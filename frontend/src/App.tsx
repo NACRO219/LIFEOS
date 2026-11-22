@@ -3,6 +3,7 @@ import { Component, useEffect, useState, type ReactNode } from "react";
 import { Field, OverlayHost, Sheet, toast } from "./components/ui";
 import { store, useStore } from "./db/store";
 import { syncChallengeXp } from "./lib/actions";
+import { evaluateAchievements } from "./lib/gamification";
 import { todayISO } from "./lib/date";
 import { checkTimer, getTimer, playChime } from "./lib/timer";
 import type { LangCode } from "./lib/types";
@@ -167,10 +168,28 @@ function Onboarding() {
   );
 }
 
+/** Unlock achievements whenever data changes (debounced), wherever the change came from. */
+function useAchievementWatcher() {
+  useEffect(() => {
+    let t: number | undefined;
+    const unsub = store().subscribe(() => {
+      clearTimeout(t);
+      t = window.setTimeout(() => {
+        for (const a of evaluateAchievements(store())) toast(`🏅 Achievement unlocked: ${a.title}`, "xp");
+      }, 400);
+    });
+    return () => {
+      clearTimeout(t);
+      unsub();
+    };
+  }, []);
+}
+
 export default function App() {
   const { path } = useRoute();
   useTheme();
   useTimerWatcher();
+  useAchievementWatcher();
   return (
     <div className="app">
       <ErrorBoundary resetKey={path}>

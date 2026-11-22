@@ -32,12 +32,6 @@ export async function initPlatform(opts: { onBack: () => boolean; onResume: () =
     if (!opts.onBack()) void App.minimizeApp(); // at the root screen: behave like a native app
   });
   await App.addListener("resume", () => opts.onResume());
-  try {
-    const { Keyboard } = await import("@capacitor/keyboard");
-    await Keyboard.setAccessoryBarVisible({ isVisible: false }).catch(() => undefined);
-  } catch {
-    /* keyboard plugin optional */
-  }
 }
 
 export async function hideSplash() {

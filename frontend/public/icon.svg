@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- content kept inside the adaptive-icon safe zone (center ~600px) -->
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="512" cy="512" r="250" stroke-width="34" opacity="0.28"/>
+    <path d="M512 262 A250 250 0 1 1 285 617" stroke-width="34"/>
+    <path d="M440 380 V610 H600" stroke-width="64"/>
+  </g>
+  <circle cx="285" cy="617" r="30" fill="#ffffff"/>
+</svg>

@@ -9,6 +9,7 @@
 //    Fixed IDs + cancel-before-schedule guarantee no duplicates.
 //  * After a reboot the plugin's BOOT_COMPLETED receiver restores pending alarms.
 import { Capacitor } from "@capacitor/core";
+import { LocalNotifications } from "@capacitor/local-notifications";
 import { addDays, todayISO, zonedTimeToDate } from "../lib/date";
 import type { Settings } from "../lib/types";
 
@@ -24,8 +25,10 @@ const CHANNEL_FOCUS = "lifeos-focus";
 export const MORNING_TEXT = "Good morning. Let's plan your day and make progress on your goals.";
 export const EVENING_TEXT = "Time for your LIFEOS check-in. Review today's progress and prepare tomorrow.";
 
-async function LN() {
-  return (await import("@capacitor/local-notifications")).LocalNotifications;
+// Static import on purpose: returning a Capacitor plugin proxy from an async function makes
+// JavaScript call proxy.then(), which Capacitor rejects ("LocalNotifications.then() is not implemented").
+function LN() {
+  return LocalNotifications;
 }
 
 export interface NotificationStatus {
@@ -37,7 +40,7 @@ export interface NotificationStatus {
 
 export async function getNotificationStatus(): Promise<NotificationStatus> {
   if (!isNative()) return { supported: false, permission: "unsupported", exactAlarms: "unsupported", pending: 0 };
-  const ln = await LN();
+  const ln = LN();
   const perm = await ln.checkPermissions();
   let exact: NotificationStatus["exactAlarms"] = "not-required";
   try {
@@ -54,7 +57,7 @@ export async function getNotificationStatus(): Promise<NotificationStatus> {
 /** Android 13+ shows the system permission dialog; older versions grant automatically. */
 export async function requestNotificationPermission(): Promise<boolean> {
   if (!isNative()) return false;
-  const ln = await LN();
+  const ln = LN();
   const res = await ln.requestPermissions();
   return res.display === "granted";
 }
@@ -62,14 +65,14 @@ export async function requestNotificationPermission(): Promise<boolean> {
 /** Opens Android's "Alarms & reminders" screen so the user can allow exact timing. */
 export async function openExactAlarmSettings() {
   if (!isNative()) return;
-  const ln = await LN();
+  const ln = LN();
   await ln.changeExactNotificationSetting();
 }
 
 let channelsReady = false;
 async function ensureChannels() {
   if (channelsReady) return;
-  const ln = await LN();
+  const ln = LN();
   await ln.createChannel({ id: CHANNEL_REMINDERS, name: "Daily check-ins", description: "Morning planning and evening review reminders", importance: 4, visibility: 1, vibration: true });
   await ln.createChannel({ id: CHANNEL_FOCUS, name: "Focus timer", description: "Pomodoro session finished", importance: 4, visibility: 1, vibration: true });
   channelsReady = true;
@@ -77,7 +80,7 @@ async function ensureChannels() {
 
 async function exactAllowed(): Promise<boolean> {
   try {
-    const ln = await LN();
+    const ln = LN();
     return (await ln.checkExactNotificationSetting()).exact_alarm === "granted";
   } catch {
     return true; // Android < 12: exact alarms need no permission
@@ -107,7 +110,7 @@ export function plannedReminderTimes(settings: Settings, now = new Date()) {
  */
 export async function syncDailyReminders(settings: Settings): Promise<{ scheduled: number; exact: boolean; message: string }> {
   if (!isNative()) return { scheduled: 0, exact: false, message: "Notifications are available in the Android app." };
-  const ln = await LN();
+  const ln = LN();
   const perm = await ln.checkPermissions();
   // Always clear our reminder IDs first so changes never leave duplicates behind.
   const ids: { id: number }[] = [];
@@ -137,7 +140,7 @@ export async function syncDailyReminders(settings: Settings): Promise<{ schedule
 
 export async function scheduleFocusEnd(at: Date, kind: string, label: string) {
   if (!isNative()) return;
-  const ln = await LN();
+  const ln = LN();
   if ((await ln.checkPermissions()).display !== "granted") return;
   await ensureChannels();
   await ln.cancel({ notifications: [{ id: FOCUS_ID }] }).catch(() => undefined);
@@ -162,14 +165,14 @@ export async function scheduleFocusEnd(at: Date, kind: string, label: string) {
 
 export async function cancelFocusEnd() {
   if (!isNative()) return;
-  const ln = await LN();
+  const ln = LN();
   await ln.cancel({ notifications: [{ id: FOCUS_ID }] }).catch(() => undefined);
 }
 
 /** Calls `onRoute` when the user taps a LIFEOS notification. */
 export async function listenForNotificationTaps(onRoute: (route: string) => void) {
   if (!isNative()) return;
-  const ln = await LN();
+  const ln = LN();
   await ln.addListener("localNotificationActionPerformed", (action) => {
     const route = (action.notification.extra as { route?: string } | undefined)?.route;
     if (route) onRoute(route);
@@ -178,7 +181,7 @@ export async function listenForNotificationTaps(onRoute: (route: string) => void
 
 export async function sendTestNotification() {
   if (!isNative()) return false;
-  const ln = await LN();
+  const ln = LN();
   if ((await ln.checkPermissions()).display !== "granted") return false;
   await ensureChannels();
   await ln.schedule({

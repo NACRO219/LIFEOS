@@ -1,0 +1,13 @@
+<!-- Android 12+ splash mark (vector = sharp at any density). Viewport matches assets-src/foreground.svg. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp" android:height="288dp" android:viewportWidth="1024" android:viewportHeight="1024">
+    <group android:scaleX="0.62" android:scaleY="0.62" android:pivotX="512" android:pivotY="512">
+        <path android:fillColor="#00000000" android:strokeColor="#47FFFFFF" android:strokeWidth="34"
+            android:pathData="M512,262 A250,250 0 1,1 511.9,262 Z" />
+        <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="34" android:strokeLineCap="round"
+            android:pathData="M512,262 A250,250 0 1,1 285,617" />
+        <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="64" android:strokeLineCap="round" android:strokeLineJoin="round"
+            android:pathData="M440,380 V610 H600" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M285,617 m-30,0 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0" />
+    </group>
+</vector>

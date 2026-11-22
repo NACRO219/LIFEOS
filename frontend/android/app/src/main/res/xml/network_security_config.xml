@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- LIFEOS only makes network requests for the OPTIONAL backup server the user configures
+     (e.g. http://192.168.x.x:8000 on their own Wi-Fi). Plain HTTP is therefore allowed so a
+     LAN server works; use an https:// URL for anything outside your home network. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
