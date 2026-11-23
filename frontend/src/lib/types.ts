@@ -39,6 +39,8 @@ export interface Task {
   createdAt: string; // ISO timestamp
   completedAt: string | null;
   recurrenceParentId?: ID | null;
+  /** Monthly recurrence: the intended day of month (e.g. 31), so short months don't make it drift. */
+  recurrenceAnchorDay?: number;
 }
 
 export interface ExamDate {
@@ -300,6 +302,7 @@ export interface Settings {
   name: string;
   timezone: string; // "device" = follow the phone
   theme: "system" | "light" | "dark";
+  language: string; // "auto" = phone language, or a code from i18n LANGUAGES
   morningEnabled: boolean;
   morningTime: string; // HH:MM
   eveningEnabled: boolean;

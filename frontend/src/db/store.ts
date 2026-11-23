@@ -39,6 +39,8 @@ export class Store {
   private rev = 0; // bumps on every mutation (cache key)
   private queue: Promise<void> = Promise.resolve();
   private pending: { collection: string; id: string; data: string | null }[] | null = null;
+  /** Undo steps for the open transaction, so a failed `transact` leaves memory unchanged. */
+  private undo: (() => void)[] = [];
   private snapshots = new Map<string, { v: number; value: unknown }>();
   errorHandler: (e: unknown) => void = (e) => console.error("LIFEOS storage error", e);
   ready = false;
@@ -118,28 +120,48 @@ export class Store {
   }
 
   // ------------------------------------------------------------ writes
-  /** Group several writes into one atomic persisted batch and a single UI update. */
+  /**
+   * Group several writes into one atomic persisted batch and a single UI update.
+   * If `fn` throws, every in-memory change it made is rolled back and nothing is persisted.
+   */
   transact<T>(fn: () => T): T {
     const outer = this.pending === null;
-    if (outer) this.pending = [];
+    if (outer) {
+      this.pending = [];
+      this.undo = [];
+    }
     try {
       const result = fn();
       if (outer) {
         const batch = this.pending!;
         this.pending = null;
+        this.undo = [];
         this.persist(batch);
         this.emit();
       }
       return result;
     } catch (e) {
-      if (outer) this.pending = null;
+      if (outer) {
+        for (let i = this.undo.length - 1; i >= 0; i--) this.undo[i]();
+        this.undo = [];
+        this.pending = null;
+        this.rev++; // invalidate cached snapshots taken during the failed transaction
+      }
       throw e;
     }
+  }
+
+  private rememberDoc(c: CollectionName, id: string) {
+    const map = this.data[c] as Map<string, unknown>;
+    const had = map.has(id);
+    const prev = map.get(id);
+    this.undo.push(() => (had ? map.set(id, prev) : map.delete(id)));
   }
 
   put<K extends CollectionName>(c: K, doc: CollectionMap[K]) {
     if (!doc || typeof (doc as { id?: unknown }).id !== "string") throw new Error(`Invalid ${c} record`);
     this.transact(() => {
+      this.rememberDoc(c, doc.id);
       (this.data[c] as Map<string, CollectionMap[K]>).set(doc.id, doc);
       this.rev++;
       this.pending!.push({ collection: c, id: doc.id, data: JSON.stringify(doc) });
@@ -154,6 +176,7 @@ export class Store {
 
   remove<K extends CollectionName>(c: K, id: string) {
     this.transact(() => {
+      this.rememberDoc(c, id);
       this.data[c].delete(id);
       this.rev++;
       this.pending!.push({ collection: c, id, data: null });
@@ -162,6 +185,8 @@ export class Store {
 
   saveSettings(patch: Partial<Settings>) {
     this.transact(() => {
+      const prev = this.settingsValue;
+      this.undo.push(() => (this.settingsValue = prev));
       this.settingsValue = { ...this.settingsValue, ...patch };
       this.pending!.push({ collection: "_settings", id: "settings", data: JSON.stringify(this.settingsValue) });
     });
@@ -173,6 +198,9 @@ export class Store {
   }
   setKv(key: string, value: unknown) {
     this.transact(() => {
+      const had = this.kv.has(key);
+      const prev = this.kv.get(key);
+      this.undo.push(() => (had ? this.kv.set(key, prev) : this.kv.delete(key)));
       if (value === null || value === undefined) {
         this.kv.delete(key);
         this.pending!.push({ collection: "_kv", id: key, data: null });
@@ -225,19 +253,37 @@ export class Store {
     return { ok: true, backup: b as BackupFile, counts };
   }
 
-  /** Replace all data with a validated backup (atomic). */
+  /**
+   * Replace all data with a validated backup. Atomic: the wipe and the new records are written
+   * in ONE storage transaction, and memory is only swapped after it commits. If the write fails
+   * (or the app is killed mid-way) the previous data is left intact.
+   */
   async restoreBackup(backup: BackupFile) {
     await this.flush();
-    const keepToken = this.settingsValue.syncToken;
-    await this.backend.clear();
-    for (const c of COLLECTIONS) this.data[c].clear();
+    const defaults = defaultSettings();
+    const settings: Settings = {
+      ...defaults,
+      ...backup.settings,
+      syncToken: this.settingsValue.syncToken,
+      xp: { ...defaults.xp, ...(backup.settings?.xp ?? {}) },
+    };
+    const data = {} as Data;
+    const batch: { collection: string; id: string; data: string | null }[] = [];
+    for (const c of COLLECTIONS) {
+      const map = new Map<string, unknown>();
+      for (const d of (backup.collections[c] ?? []) as { id: unknown }[]) {
+        if (!d || typeof d.id !== "string") throw new Error(`Invalid ${c} record`);
+        map.set(d.id, d);
+        batch.push({ collection: c, id: d.id, data: JSON.stringify(d) });
+      }
+      (data as Record<string, Map<string, unknown>>)[c] = map;
+    }
+    batch.push({ collection: "_settings", id: "settings", data: JSON.stringify(settings) });
+    await this.backend.write(batch, { clear: true }); // throws → nothing changed
+    this.data = data;
     this.kv.clear();
-    this.transact(() => {
-      for (const c of COLLECTIONS) for (const d of (backup.collections[c] ?? []) as CollectionMap[typeof c][]) this.put(c, d);
-      this.settingsValue = defaultSettings();
-      this.saveSettings({ ...backup.settings, syncToken: keepToken, xp: { ...defaultSettings().xp, ...(backup.settings?.xp ?? {}) } });
-    });
-    await this.flush();
+    this.settingsValue = settings;
+    this.emit();
     if (backup.schemaVersion < SCHEMA_VERSION) {
       await this.backend.setMeta("schema_version", String(backup.schemaVersion));
       await this.migrate();

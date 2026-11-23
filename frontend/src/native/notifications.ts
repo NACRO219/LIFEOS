@@ -10,6 +10,7 @@
 //  * After a reboot the plugin's BOOT_COMPLETED receiver restores pending alarms.
 import { Capacitor } from "@capacitor/core";
 import { LocalNotifications } from "@capacitor/local-notifications";
+import { t } from "../i18n";
 import { addDays, todayISO, zonedTimeToDate } from "../lib/date";
 import type { Settings } from "../lib/types";
 
@@ -22,8 +23,6 @@ const WINDOW_DAYS = 30;
 const CHANNEL_REMINDERS = "lifeos-reminders";
 const CHANNEL_FOCUS = "lifeos-focus";
 
-export const MORNING_TEXT = "Good morning. Let's plan your day and make progress on your goals.";
-export const EVENING_TEXT = "Time for your LIFEOS check-in. Review today's progress and prepare tomorrow.";
 
 // Static import on purpose: returning a Capacitor plugin proxy from an async function makes
 // JavaScript call proxy.then(), which Capacitor rejects ("LocalNotifications.then() is not implemented").
@@ -73,8 +72,8 @@ let channelsReady = false;
 async function ensureChannels() {
   if (channelsReady) return;
   const ln = LN();
-  await ln.createChannel({ id: CHANNEL_REMINDERS, name: "Daily check-ins", description: "Morning planning and evening review reminders", importance: 4, visibility: 1, vibration: true });
-  await ln.createChannel({ id: CHANNEL_FOCUS, name: "Focus timer", description: "Pomodoro session finished", importance: 4, visibility: 1, vibration: true });
+  await ln.createChannel({ id: CHANNEL_REMINDERS, name: t("notif.chanReminders"), description: t("notif.chanRemindersDesc"), importance: 4, visibility: 1, vibration: true });
+  await ln.createChannel({ id: CHANNEL_FOCUS, name: t("notif.chanFocus"), description: t("notif.chanFocusDesc"), importance: 4, visibility: 1, vibration: true });
   channelsReady = true;
 }
 
@@ -109,23 +108,23 @@ export function plannedReminderTimes(settings: Settings, now = new Date()) {
  * Does not prompt for permissions; call requestNotificationPermission() from a user action first.
  */
 export async function syncDailyReminders(settings: Settings): Promise<{ scheduled: number; exact: boolean; message: string }> {
-  if (!isNative()) return { scheduled: 0, exact: false, message: "Notifications are available in the Android app." };
+  if (!isNative()) return { scheduled: 0, exact: false, message: t("notif.webOnly") };
   const ln = LN();
   const perm = await ln.checkPermissions();
   // Always clear our reminder IDs first so changes never leave duplicates behind.
   const ids: { id: number }[] = [];
   for (let i = 0; i < WINDOW_DAYS + 5; i++) ids.push({ id: MORNING_BASE + i }, { id: EVENING_BASE + i });
   await ln.cancel({ notifications: ids }).catch(() => undefined);
-  if (perm.display !== "granted") return { scheduled: 0, exact: false, message: "Notification permission not granted." };
+  if (perm.display !== "granted") return { scheduled: 0, exact: false, message: t("notif.noPermission") };
   await ensureChannels();
   const exact = await exactAllowed();
   const planned = plannedReminderTimes(settings);
-  if (!planned.length) return { scheduled: 0, exact, message: "Reminders are turned off." };
+  if (!planned.length) return { scheduled: 0, exact, message: t("notif.off") };
   await ln.schedule({
     notifications: planned.map((p) => ({
       id: p.id,
-      title: p.kind === "morning" ? "LIFEOS · Morning plan" : "LIFEOS · Evening check-in",
-      body: p.kind === "morning" ? MORNING_TEXT : EVENING_TEXT,
+      title: p.kind === "morning" ? t("notif.morningTitle") : t("notif.eveningTitle"),
+      body: p.kind === "morning" ? t("notif.morningBody") : t("notif.eveningBody"),
       channelId: CHANNEL_REMINDERS,
       smallIcon: "ic_stat_lifeos",
       iconColor: "#4F7CFF",
@@ -135,7 +134,7 @@ export async function syncDailyReminders(settings: Settings): Promise<{ schedule
       autoCancel: true,
     })),
   });
-  return { scheduled: planned.length, exact, message: exact ? "Scheduled with exact timing." : "Scheduled. Exact timing is off, so Android may deliver a few minutes late." };
+  return { scheduled: planned.length, exact, message: exact ? t("notif.exact") : t("notif.inexact") };
 }
 
 export async function scheduleFocusEnd(at: Date, kind: string, label: string) {
@@ -149,8 +148,8 @@ export async function scheduleFocusEnd(at: Date, kind: string, label: string) {
     notifications: [
       {
         id: FOCUS_ID,
-        title: focus ? "Focus session complete" : "Break is over",
-        body: focus ? `${label ? label + " · " : ""}Nice work. Take a break.` : "Ready for the next focus session?",
+        title: focus ? t("focus.notifDone") : t("focus.notifBreak"),
+        body: focus ? `${label ? label + " · " : ""}${t("focus.notifDoneBody")}` : t("focus.notifBreakBody"),
         channelId: CHANNEL_FOCUS,
         smallIcon: "ic_stat_lifeos",
         iconColor: "#4F7CFF",
@@ -185,7 +184,7 @@ export async function sendTestNotification() {
   if ((await ln.checkPermissions()).display !== "granted") return false;
   await ensureChannels();
   await ln.schedule({
-    notifications: [{ id: 9000, title: "LIFEOS test", body: "Notifications are working. Tap to open the evening check-in.", channelId: CHANNEL_REMINDERS, smallIcon: "ic_stat_lifeos", schedule: { at: new Date(Date.now() + 5000), allowWhileIdle: true }, isExactNotification: false, extra: { route: "/checkin/evening" } }],
+    notifications: [{ id: 9000, title: t("notif.testTitle"), body: t("notif.testBody"), channelId: CHANNEL_REMINDERS, smallIcon: "ic_stat_lifeos", schedule: { at: new Date(Date.now() + 5000), allowWhileIdle: true }, isExactNotification: false, extra: { route: "/checkin/evening" } }],
   });
   return true;
 }

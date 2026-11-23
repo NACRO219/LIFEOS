@@ -1,6 +1,7 @@
 // Adaptive planner. Pure functions: callers decide what to persist, and every
 // rescheduling proposal must be confirmed by the user before it is applied.
-import { addDays, diffDays, minToTime, timeToMin } from "./date";
+import { t as tr, type TKey } from "../i18n";
+import { addDays, diffDays, minToTime, timeToMin, prettyDay } from "./date";
 import type { Commitment, Course, DayPlan, PlanBlock, Priority, Task } from "./types";
 
 export const DEFAULT_TASK_MIN = 30;
@@ -24,21 +25,21 @@ export function isOverdue(t: Task, today: string) {
 export function scoreTask(t: Task, today: string, courses: Course[] = []): { score: number; reasons: string[] } {
   const reasons: string[] = [];
   let score = PRIORITY_WEIGHT[t.priority] ?? 20;
-  if (t.priority === "critical" || t.priority === "high") reasons.push(`${t.priority} priority`);
+  if (t.priority === "critical" || t.priority === "high") reasons.push(tr("reason.priority", { p: tr(`prio.${t.priority}` as TKey).toLowerCase() }));
   if (t.deadline) {
     const d = diffDays(today, t.deadline);
     if (d < 0) {
       score += 50 + Math.min(-d, 10) * 2;
-      reasons.push(`overdue by ${-d} day${d === -1 ? "" : "s"}`);
+      reasons.push(tr("reason.overdue", { n: -d }));
     } else if (d === 0) {
       score += 40;
-      reasons.push("due today");
+      reasons.push(tr("reason.dueToday"));
     } else if (d === 1) {
       score += 30;
-      reasons.push("due tomorrow");
+      reasons.push(tr("reason.dueTomorrow"));
     } else if (d <= 3) {
       score += 20;
-      reasons.push(`due in ${d} days`);
+      reasons.push(tr("reason.dueIn", { n: d }));
     } else if (d <= 7) score += 10;
   }
   if (t.courseId) {
@@ -46,15 +47,15 @@ export function scoreTask(t: Task, today: string, courses: Course[] = []): { sco
     const exam = c?.exams.map((e) => diffDays(today, e.date)).filter((d) => d >= 0 && d <= 7).sort((a, b) => a - b)[0];
     if (exam !== undefined) {
       score += 15;
-      reasons.push(`exam in ${exam} day${exam === 1 ? "" : "s"}`);
+      reasons.push(tr("reason.exam", { n: exam }));
     }
   }
   if (t.scheduledDate === today) {
     score += 15;
-    reasons.push("scheduled for today");
+    reasons.push(tr("reason.scheduled"));
   } else if (t.scheduledDate && t.scheduledDate < today) {
     score += 10;
-    reasons.push("carried over");
+    reasons.push(tr("reason.carried"));
   }
   if (taskMinutes(t) <= 20) score += 3;
   if (t.status === "in_progress") score += 5;
@@ -213,7 +214,7 @@ export function proposeReschedule(tasks: Task[], today: string, capacityFor: (da
   // 1. carried-over tasks, most urgent first
   const carried = tasks.filter((t) => isOpen(t) && t.scheduledDate && t.scheduledDate < today);
   carried.sort((a, b) => scoreTask(b, today, courses).score - scoreTask(a, today, courses).score);
-  for (const t of carried) apply(t, findDay(t, 0), "Unfinished on " + t.scheduledDate);
+  for (const t of carried) apply(t, findDay(t, 0), tr("reason.unfinished", { date: prettyDay(t.scheduledDate!) }));
 
   // 2. overloaded days
   for (let i = 0; i < horizon; i++) {
@@ -223,15 +224,18 @@ export function proposeReschedule(tasks: Task[], today: string, capacityFor: (da
       const ranked = [...dayTasks].sort((a, b) => scoreTask(a, d, courses).score - scoreTask(b, d, courses).score);
       const victim = ranked.find((t) => !(t.deadline && t.deadline <= d)) ?? null; // keep tasks due that day
       if (!victim) break;
-      apply(victim, findDay(victim, i + 1), `Day overloaded (${Math.round((load.get(d) ?? 0) / 60 * 10) / 10}h planned)`);
+      apply(victim, findDay(victim, i + 1), tr("reason.overloaded", { h: Math.round(((load.get(d) ?? 0) / 60) * 10) / 10 }));
       dayTasks = dayTasks.filter((t) => t.id !== victim.id);
     }
   }
   return moves;
 }
 
-/** Next instance date for a recurring task, or null. */
-export function nextRecurrence(day: string, r: Task["recurrence"]): string | null {
+/**
+ * Next instance date for a recurring task, or null.
+ * `anchorDay` (monthly only) is the intended day of month: 31 → Feb 28 → Mar 31, never stuck on 28.
+ */
+export function nextRecurrence(day: string, r: Task["recurrence"], anchorDay?: number): string | null {
   switch (r) {
     case "daily":
       return addDays(day, 1);
@@ -247,7 +251,11 @@ export function nextRecurrence(day: string, r: Task["recurrence"]): string | nul
       const nm = m === 12 ? 1 : m + 1;
       const ny = m === 12 ? y + 1 : y;
       const last = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
-      return `${ny}-${String(nm).padStart(2, "0")}-${String(Math.min(dd, last)).padStart(2, "0")}`;
+      // Only honour the anchor when this date was clipped to its month's end (e.g. 31 → Feb 28);
+      // if the user moved an instance to another day, follow that day instead.
+      const lastOfThis = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      const want = anchorDay && anchorDay <= 31 && dd < anchorDay && dd === lastOfThis ? anchorDay : dd;
+      return `${ny}-${String(nm).padStart(2, "0")}-${String(Math.min(want, last)).padStart(2, "0")}`;
     }
     default:
       return null;

@@ -1,3 +1,5 @@
+import { intlLocale, t } from "../i18n";
+
 // Date helpers. Dates are stored as local calendar days "YYYY-MM-DD".
 // "Today" honours the configured timezone ("device" = the phone's timezone).
 
@@ -113,33 +115,37 @@ export function minToTime(min: number): string {
 }
 
 export function prettyDay(day: string, opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" }) {
-  return parseDay(day).toLocaleDateString(undefined, { ...opts, timeZone: "UTC" });
+  return parseDay(day).toLocaleDateString(intlLocale(), { ...opts, timeZone: "UTC" });
 }
 
+/** "Today", "Tomorrow", "In 3 days"… in the active language (falls back to a date beyond a week). */
 export function relativeDay(day: string, today = todayISO()): string {
   const n = diffDays(today, day);
-  if (n === 0) return "Today";
-  if (n === 1) return "Tomorrow";
-  if (n === -1) return "Yesterday";
-  if (n > 1 && n < 7) return `In ${n} days`;
-  if (n < -1) return `${-n} days ago`;
+  if (Math.abs(n) <= 6) {
+    try {
+      const s = new Intl.RelativeTimeFormat(intlLocale(), { numeric: "auto" }).format(n, "day");
+      return s.charAt(0).toLocaleUpperCase(intlLocale()) + s.slice(1);
+    } catch {
+      /* very old WebView: fall through */
+    }
+  }
   return prettyDay(day);
 }
 
 export function formatDuration(min: number): string {
   const m = Math.round(min);
-  if (m < 60) return `${m} min`;
+  if (m < 60) return t("dur.min", { n: m });
   const h = Math.floor(m / 60);
   const r = m % 60;
-  return r ? `${h}h ${r}m` : `${h}h`;
+  return r ? t("dur.hm", { h, m: r }) : t("dur.h", { h });
 }
 
 export function greeting(now: Date = new Date()): string {
   const h = zonedParts(now).hour;
-  if (h < 5) return "Good night";
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
-  return "Good evening";
+  if (h < 5) return t("greet.night");
+  if (h < 12) return t("greet.morning");
+  if (h < 18) return t("greet.afternoon");
+  return t("greet.evening");
 }
 
 /**
@@ -160,4 +166,8 @@ export function zonedTimeToDate(day: string, time: string, tz = effectiveTimezon
   return new Date(guess);
 }
 
-export const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+/** Short weekday name in the active language (0 = Sunday). */
+export function weekdayShort(i: number): string {
+  // 2023-01-01 was a Sunday
+  return new Date(Date.UTC(2023, 0, 1 + i, 12)).toLocaleDateString(intlLocale(), { weekday: "short", timeZone: "UTC" });
+}

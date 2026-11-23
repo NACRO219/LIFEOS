@@ -7,7 +7,10 @@ The Android app is offline-first and does NOT need this server. The server offer
 Configuration (environment variables or backend/.env):
   DATABASE_URL        default sqlite:///./lifeos.db
   CORS_ORIGINS        comma-separated, default http://localhost:5173,http://127.0.0.1:5173
-  LIFEOS_SYNC_TOKEN   enables /api/backup; use a long random value (>= 24 chars)
+  LIFEOS_SYNC_TOKEN   enables /api/backup; use a long random value (>= 24 chars).
+                      When set, EVERY /api/* endpoint except /api/health requires
+                      "Authorization: Bearer <token>", so a server reachable on your
+                      network can't be read or changed by anyone else.
 """
 from __future__ import annotations
 
@@ -42,7 +45,21 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="LIFEOS API", version="2.0.0", lifespan=lifespan)
+def _token_matches(authorization: str | None, expected: str) -> bool:
+    given = (authorization or "").removeprefix("Bearer ").strip()
+    return bool(given) and hmac.compare_digest(given.encode(), expected.encode())
+
+
+def require_api_auth(request: Request, authorization: str | None = Header(default=None)) -> None:
+    """Protects the data endpoints whenever a token is configured (open only for local dev without one)."""
+    if request.url.path == "/api/health" or request.url.path.startswith("/api/backup"):
+        return  # health is public; backup routes enforce their own (stricter) rule
+    expected = sync_token()
+    if expected and not _token_matches(authorization, expected):
+        raise HTTPException(401, "Invalid or missing API token")
+
+
+app = FastAPI(title="LIFEOS API", version="2.0.0", lifespan=lifespan, dependencies=[Depends(require_api_auth)])
 _origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -76,8 +93,7 @@ def require_sync_auth(authorization: str | None = Header(default=None)) -> None:
     expected = sync_token()
     if not expected:
         raise HTTPException(503, "Sync is disabled: set LIFEOS_SYNC_TOKEN on the server")
-    given = (authorization or "").removeprefix("Bearer ").strip()
-    if not given or not hmac.compare_digest(given.encode(), expected.encode()):
+    if not _token_matches(authorization, expected):
         raise HTTPException(401, "Invalid sync token")
 
 
@@ -245,20 +261,30 @@ def delete_grade(grade_id: int, session: Session = Depends(get_session)):
 # ---------------------------------------------------------------- phone backups (optional sync)
 @app.put("/api/backup", dependencies=[Depends(require_sync_auth)])
 async def put_backup(request: Request, session: Session = Depends(get_session)):
-    raw = await request.body()
-    if len(raw) > MAX_BACKUP_BYTES:
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_BACKUP_BYTES:
         raise HTTPException(413, "Backup is too large")
+    # Read incrementally so an oversized or lying upload is rejected without buffering all of it.
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > MAX_BACKUP_BYTES:
+            raise HTTPException(413, "Backup is too large")
+        chunks.append(chunk)
+    raw = b"".join(chunks)
     try:
-        data = json.loads(raw)
+        text_body = raw.decode("utf-8")
+        data = json.loads(text_body)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise HTTPException(422, "Body must be JSON") from exc
+        raise HTTPException(422, "Body must be UTF-8 JSON") from exc
     if not isinstance(data, dict) or data.get("format") != "lifeos-backup" or not isinstance(data.get("collections"), dict):
         raise HTTPException(422, "Not a LIFEOS backup")
     snap = BackupSnapshot(
         exported_at=str(data.get("exportedAt", ""))[:40],
         schema_version=int(data.get("schemaVersion", 0) or 0),
         size=len(raw),
-        payload=raw.decode("utf-8"),
+        payload=text_body,
     )
     session.add(snap)
     session.commit()

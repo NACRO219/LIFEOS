@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { TaskRow, TaskSheet } from "../components/tasks";
 import { Bar, Card, Empty, Page, Ring, Section, Stat } from "../components/ui";
 import { useStore } from "../db/store";
+import { t } from "../i18n";
 import { addDays, diffDays, localDay, formatDuration, greeting, nowMinutes, prettyDay, relativeDay, timeToMin, todayISO } from "../lib/date";
 import { dailyChallenges } from "../lib/gamification";
 import { formatGpa, gpaSummary } from "../lib/gpa";
@@ -40,24 +41,24 @@ export default function Dashboard() {
   const focusToday = focusMinutes(s, today);
   const courses = s.all("courses");
   const activeCourses = courses.filter((c) => c.status === "in_progress");
-  const uniOpen = s.all("tasks").filter((t) => t.category === "University" && isOpen(t)).length;
-  const uniDoneWeek = s.all("tasks").filter((t) => t.category === "University" && t.status === "done" && t.completedAt && localDay(t.completedAt) >= wFrom).length;
+  const uniOpen = s.all("tasks").filter((x) => x.category === "University" && isOpen(x)).length;
+  const uniDoneWeek = s.all("tasks").filter((x) => x.category === "University" && x.status === "done" && x.completedAt && localDay(x.completedAt) >= wFrom).length;
 
   // Upcoming deadlines (next 14 days) — tasks and exams
   const horizon = addDays(today, 14);
   const deadlines = [
     ...s
       .all("tasks")
-      .filter((t) => isOpen(t) && t.deadline && t.deadline <= horizon)
-      .map((t) => ({ id: t.id, title: t.title, date: t.deadline!, kind: t.kind === "assignment" ? "Assignment" : "Task", color: courses.find((c) => c.id === t.courseId)?.color })),
-    ...courses.flatMap((c) => c.exams.filter((e) => e.date >= today && e.date <= horizon).map((e) => ({ id: e.id, title: `${e.title} · ${c.code || c.name}`, date: e.date, kind: "Exam", color: c.color }))),
+      .filter((x) => isOpen(x) && x.deadline && x.deadline <= horizon)
+      .map((x) => ({ id: x.id, title: x.title, date: x.deadline!, kind: x.kind === "assignment" ? t("kind.assignment") : t("kind.task"), color: courses.find((c) => c.id === x.courseId)?.color })),
+    ...courses.flatMap((c) => c.exams.filter((e) => e.date >= today && e.date <= horizon).map((e) => ({ id: e.id, title: `${e.title} · ${c.code || c.name}`, date: e.date, kind: t("dash.exam"), color: c.color }))),
   ].sort((a, b) => a.date.localeCompare(b.date));
 
   // Next scheduled reminder
   const now = nowMinutes();
   const reminders = [
-    settings.morningEnabled && { label: "Morning plan", time: settings.morningTime },
-    settings.eveningEnabled && { label: "Evening check-in", time: settings.eveningTime },
+    settings.morningEnabled && { label: t("dash.morningPlan"), time: settings.morningTime },
+    settings.eveningEnabled && { label: t("dash.eveningCheckin"), time: settings.eveningTime },
   ].filter(Boolean) as { label: string; time: string }[];
   const nextRem = reminders.map((r) => ({ ...r, inMin: (timeToMin(r.time) - now + 1440) % 1440 })).sort((a, b) => a.inMin - b.inMin)[0];
   const challenges = dailyChallenges(s, today);
@@ -68,45 +69,41 @@ export default function Dashboard() {
         <div className="row gap-l">
           <Ring value={completion.percent} size={88} stroke={9} color="#fff" track="rgba(255,255,255,.25)" />
           <div className="grow col gap-s">
-            <div className="small muted">Today's progress</div>
-            <b style={{ fontSize: 17 }}>
-              {completion.tasksDone}/{completion.tasksTotal} tasks · {formatDuration(focusToday)} focus
-            </b>
+            <div className="small muted">{t("dash.todayProgress")}</div>
+            <b style={{ fontSize: 17 }}>{t("dash.tasksFocus", { done: completion.tasksDone, total: completion.tasksTotal, focus: formatDuration(focusToday) })}</b>
             <div className="row between small">
-              <span>Level {lvl.level}</span>
-              <span className="muted">
-                {lvl.intoLevel}/{lvl.needed} XP
-              </span>
+              <span>{t("dash.level", { n: lvl.level })}</span>
+              <span className="muted">{t("dash.xpOf", { into: lvl.intoLevel, need: lvl.needed })}</span>
             </div>
             <Bar value={lvl.progress} />
           </div>
         </div>
         <div className="row mt between small">
           <span className="row gap-s">
-            <Flame size={16} /> {streak}-day streak
+            <Flame size={16} /> {t("dash.streak", { n: streak })}
           </span>
           <span className="row gap-s">
-            <Sparkles size={16} /> {xp.toLocaleString()} XP total
+            <Sparkles size={16} /> {t("dash.xpTotal", { n: xp })}
           </span>
         </div>
       </Card>
 
       <Section
-        title="Today's 3 priorities"
+        title={t("dash.priorities")}
         action={
           <button className="btn ghost small" onClick={() => go("/plan")}>
-            {priorities.length ? "Edit" : "Plan day"}
+            {priorities.length ? t("common.edit") : t("dash.planDay")}
           </button>
         }
       >
         <Card className="tight">
           {priorities.length > 0 ? (
             <div className="list">
-              {priorities.map((t, i) => (
-                <div key={t.id} className="row">
+              {priorities.map((x, i) => (
+                <div key={x.id} className="row">
                   <span className="priority-num">{i + 1}</span>
                   <div className="grow">
-                    <TaskRow task={t} onOpen={setEditing} />
+                    <TaskRow task={x} onOpen={setEditing} />
                   </div>
                 </div>
               ))}
@@ -114,11 +111,11 @@ export default function Dashboard() {
           ) : (
             <Empty
               icon={<Target />}
-              title="No priorities set for today"
-              text={suggestions.length ? `Suggested: ${suggestions.map((x) => x.task.title).join(" · ")}` : "Add tasks, then do your morning plan."}
+              title={t("dash.noPriorities")}
+              text={suggestions.length ? t("dash.suggested", { list: suggestions.map((x) => x.task.title).join(" · ") }) : t("dash.addThenPlan")}
               action={
                 <button className="btn primary small" onClick={() => go("/checkin/morning")}>
-                  Start morning plan
+                  {t("dash.startMorning")}
                 </button>
               }
             />
@@ -127,51 +124,66 @@ export default function Dashboard() {
       </Section>
 
       <Section
-        title="Today's tasks"
+        title={t("dash.todaysTasks")}
         action={
           <button className="btn ghost small" onClick={() => go("/tasks")}>
-            All tasks
+            {t("dash.allTasks")}
           </button>
         }
       >
         <Card className="tight">
           {todayList.length ? (
             <div className="list">
-              {todayList.slice(0, 7).map((t) => (
-                <TaskRow key={t.id} task={t} onOpen={setEditing} />
+              {todayList.slice(0, 7).map((x) => (
+                <TaskRow key={x.id} task={x} onOpen={setEditing} />
               ))}
               {todayList.length > 7 && (
                 <button className="btn ghost" onClick={() => go("/tasks")}>
-                  +{todayList.length - 7} more
+                  {t("common.more", { n: todayList.length - 7 })}
                 </button>
               )}
             </div>
           ) : (
-            <Empty title="Nothing planned for today" text="Tasks scheduled or due today appear here." action={<button className="btn small" onClick={() => setAdding(true)}><Plus size={16} /> Add task</button>} />
+            <Empty
+              title={t("dash.nothingToday")}
+              text={t("dash.nothingTodayHint")}
+              action={
+                <button className="btn small" onClick={() => setAdding(true)}>
+                  <Plus size={16} /> {t("task.add")}
+                </button>
+              }
+            />
           )}
         </Card>
       </Section>
 
-      <Section title="Progress">
+      <Section title={t("dash.progress")}>
         <div className="grid-2">
-          <Stat label="GPA" icon={<GraduationCap size={14} />} value={settings.hideGpaOnDashboard ? "•••" : formatGpa(gpa.cumulative)} sub={gpa.cumulative === null ? "No grades recorded" : `${gpa.cumulativeCredits} credits`} onClick={() => go("/uni/gpa")} />
-          <Stat label="University" icon={<BookOpen size={14} />} value={`${activeCourses.length} course${activeCourses.length === 1 ? "" : "s"}`} sub={`${uniOpen} open · ${uniDoneWeek} done this week`} onClick={() => go("/uni")} />
-          <Stat label="Programming" icon={<Code2 size={14} />} value={`${Math.round(cs.percent * 100)}%`} sub={`${cs.done}/${cs.total} lessons · ${codeWeek} solved this week`} onClick={() => go("/cs")} />
-          <Stat label="Languages" icon={<Languages size={14} />} value={`${langToday} min`} sub={`today · goal ${settings.dailyGoals.languageMin} min`} onClick={() => go("/lang")} />
-          <Stat label="Fitness" icon={<Dumbbell size={14} />} value={`${gymWeek}/${settings.weeklyGoals.workouts}`} sub="workouts this week" onClick={() => go("/fitness")} />
-          <Stat label="Focus" icon={<Timer size={14} />} value={formatDuration(focusToday)} sub={`today · goal ${formatDuration(settings.dailyGoals.focusMin)}`} onClick={() => go("/focus")} />
+          <Stat label={t("dash.gpa")} icon={<GraduationCap size={14} />} value={settings.hideGpaOnDashboard ? "•••" : formatGpa(gpa.cumulative)} sub={gpa.cumulative === null ? t("dash.noGrades") : t("dash.credits", { n: gpa.cumulativeCredits })} onClick={() => go("/uni/gpa")} />
+          <Stat label={t("dash.university")} icon={<BookOpen size={14} />} value={activeCourses.length} sub={t("dash.uniSub", { open: uniOpen, done: uniDoneWeek })} onClick={() => go("/uni")} />
+          <Stat label={t("dash.programming")} icon={<Code2 size={14} />} value={`${Math.round(cs.percent * 100)}%`} sub={t("dash.progSub", { done: cs.done, total: cs.total, n: codeWeek })} onClick={() => go("/cs")} />
+          <Stat label={t("dash.languages")} icon={<Languages size={14} />} value={formatDuration(langToday)} sub={t("dash.todayGoal", { goal: formatDuration(settings.dailyGoals.languageMin) })} onClick={() => go("/lang")} />
+          <Stat label={t("dash.fitness")} icon={<Dumbbell size={14} />} value={`${gymWeek}/${settings.weeklyGoals.workouts}`} sub={t("dash.workoutsWeek")} onClick={() => go("/fitness")} />
+          <Stat label={t("dash.focus")} icon={<Timer size={14} />} value={formatDuration(focusToday)} sub={t("dash.todayGoal", { goal: formatDuration(settings.dailyGoals.focusMin) })} onClick={() => go("/focus")} />
         </div>
       </Section>
 
       {challenges.length > 0 && (
-        <Section title="Daily challenges" action={<button className="btn ghost small" onClick={() => go("/xp")}>XP & badges</button>}>
+        <Section
+          title={t("dash.challenges")}
+          action={
+            <button className="btn ghost small" onClick={() => go("/xp")}>
+              {t("dash.xpBadges")}
+            </button>
+          }
+        >
           <Card>
             <div className="col">
               {challenges.map((c) => (
                 <div key={c.id} className="col gap-s">
                   <div className="row between small">
                     <span>{c.title}</span>
-                    <span className={c.progress >= 1 ? "tag success" : "faint"}>{c.progress >= 1 ? `+${c.xp} XP ✓` : c.label}</span>
+                    <span className={c.progress >= 1 ? "tag success" : "faint"}>{c.progress >= 1 ? t("common.xpDone", { n: c.xp }) : c.label}</span>
                   </div>
                   <Bar value={c.progress} tone={c.progress >= 1 ? "success" : undefined} />
                 </div>
@@ -181,7 +193,14 @@ export default function Dashboard() {
         </Section>
       )}
 
-      <Section title="Upcoming deadlines" action={<button className="btn ghost small" onClick={() => go("/uni/calendar")}>Calendar</button>}>
+      <Section
+        title={t("dash.deadlines")}
+        action={
+          <button className="btn ghost small" onClick={() => go("/uni/calendar")}>
+            {t("dash.calendar")}
+          </button>
+        }
+      >
         <Card className="tight">
           {deadlines.length ? (
             <div className="list">
@@ -200,34 +219,36 @@ export default function Dashboard() {
               })}
             </div>
           ) : (
-            <Empty icon={<CalendarClock />} title="No deadlines in the next 2 weeks" />
+            <Empty icon={<CalendarClock />} title={t("dash.noDeadlines")} />
           )}
         </Card>
       </Section>
 
-      <Section title="Reminders">
+      <Section title={t("dash.reminders")}>
         <Card className="tight" onClick={() => go("/settings")}>
           <div className="list-item">
             <Bell size={20} className="faint" />
             <div className="grow">
               {nextRem ? (
                 <>
-                  <div className="title">
-                    Next: {nextRem.label} at {nextRem.time}
-                  </div>
-                  <div className="sub">in {formatDuration(nextRem.inMin)}</div>
+                  <div className="title">{t("dash.nextReminder", { label: nextRem.label, time: nextRem.time })}</div>
+                  <div className="sub">{t("dash.inDur", { dur: formatDuration(nextRem.inMin) })}</div>
                 </>
               ) : (
-                <div className="title">Daily reminders are off</div>
+                <div className="title">{t("dash.remindersOff")}</div>
               )}
-              {notif?.supported && notif.permission !== "granted" && <div className="sub" style={{ color: "var(--danger)" }}>Notification permission not granted. Tap to fix.</div>}
-              {notif && !notif.supported && <div className="sub">Native notifications run in the Android app.</div>}
+              {notif?.supported && notif.permission !== "granted" && (
+                <div className="sub" style={{ color: "var(--danger)" }}>
+                  {t("dash.permMissing")}
+                </div>
+              )}
+              {notif && !notif.supported && <div className="sub">{t("dash.androidOnly")}</div>}
             </div>
           </div>
         </Card>
       </Section>
 
-      <button className="fab" aria-label="Add task" onClick={() => setAdding(true)}>
+      <button className="fab" aria-label={t("task.add")} onClick={() => setAdding(true)}>
         <Plus size={26} />
       </button>
       <TaskSheet open={adding} onClose={() => setAdding(false)} defaults={{ scheduledDate: today }} />

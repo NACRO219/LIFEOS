@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 // Lightweight SVG charts (no runtime dependency; theme-aware through CSS variables).
 
 export function BarChart({ data, height = 140, unit = "", color = "var(--accent)", goal }: { data: { label: string; value: number }[]; height?: number; unit?: string; color?: string; goal?: number }) {
@@ -8,7 +10,7 @@ export function BarChart({ data, height = 140, unit = "", color = "var(--accent)
   const ih = height - pad.t - pad.b;
   const y = (v: number) => pad.t + ih - (v / max) * ih;
   return (
-    <svg viewBox={`0 0 ${w} ${height}`} width="100%" height={height} role="img" aria-label="Bar chart">
+    <svg viewBox={`0 0 ${w} ${height}`} width="100%" height={height} role="img" aria-label={t("a11y.barChart")}>
       {goal !== undefined && goal > 0 && <line x1={pad.l} x2={w - pad.r} y1={y(goal)} y2={y(goal)} stroke="var(--text-3)" strokeDasharray="4 4" strokeWidth={1} />}
       {data.map((d, i) => {
         const h = Math.max(d.value > 0 ? 3 : 0, (d.value / max) * ih);
@@ -38,7 +40,7 @@ export function LineChart({ data, height = 150, unit = "", color = "var(--accent
   if (data.length < 2)
     return (
       <div className="empty" style={{ padding: 16 }}>
-        <small>Add at least two entries to see a trend.</small>
+        <small>{t("chart.trendEmpty")}</small>
       </div>
     );
   const w = 320;
@@ -52,7 +54,7 @@ export function LineChart({ data, height = 150, unit = "", color = "var(--accent
   const path = data.map((d, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(d.value).toFixed(1)}`).join(" ");
   const step = Math.ceil(data.length / 6);
   return (
-    <svg viewBox={`0 0 ${w} ${height}`} width="100%" height={height} role="img" aria-label="Line chart">
+    <svg viewBox={`0 0 ${w} ${height}`} width="100%" height={height} role="img" aria-label={t("a11y.lineChart")}>
       <path d={`${path} L${x(data.length - 1)},${height - pad.b} L${x(0)},${height - pad.b} Z`} fill={color} opacity={0.1} />
       <path d={path} fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
       {data.map((d, i) => (
@@ -68,7 +70,7 @@ export function LineChart({ data, height = 150, unit = "", color = "var(--accent
         </g>
       ))}
       <text x={w - pad.r} y={12} textAnchor="end" className="chart-label">
-        {`${Math.round(hi * 10) / 10}${unit} max · ${Math.round(lo * 10) / 10}${unit} min`}
+        {t("chart.maxMin", { max: `${Math.round(hi * 10) / 10}${unit}`, min: `${Math.round(lo * 10) / 10}${unit}` })}
       </text>
     </svg>
   );

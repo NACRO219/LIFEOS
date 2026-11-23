@@ -2,6 +2,7 @@ import { CalendarDays, GraduationCap, Grid3x3, Home, Timer } from "lucide-react"
 import { Component, useEffect, useState, type ReactNode } from "react";
 import { Field, OverlayHost, Sheet, toast } from "./components/ui";
 import { store, useStore } from "./db/store";
+import { currentLanguage, t, type TKey } from "./i18n";
 import { syncChallengeXp } from "./lib/actions";
 import { evaluateAchievements } from "./lib/gamification";
 import { todayISO } from "./lib/date";
@@ -21,16 +22,16 @@ import More from "./pages/More";
 import Music from "./pages/Music";
 import Planner from "./pages/Planner";
 import Progress from "./pages/Progress";
-import Settings from "./pages/Settings";
+import Settings, { LanguagePicker } from "./pages/Settings";
 import Tasks from "./pages/Tasks";
 import University, { CourseDetail } from "./pages/University";
 
-const NAV = [
-  { path: "/", label: "Home", icon: Home, match: (p: string) => p === "/" },
-  { path: "/plan", label: "Plan", icon: CalendarDays, match: (p: string) => p.startsWith("/plan") || p.startsWith("/tasks") || p.startsWith("/checkin") },
-  { path: "/uni", label: "Uni", icon: GraduationCap, match: (p: string) => p.startsWith("/uni") },
-  { path: "/focus", label: "Focus", icon: Timer, match: (p: string) => p.startsWith("/focus") },
-  { path: "/more", label: "More", icon: Grid3x3, match: (p: string) => !["/", "/focus"].includes(p) && !/^\/(plan|tasks|checkin|uni)/.test(p) },
+const NAV: { path: string; label: TKey; icon: typeof Home; match: (p: string) => boolean }[] = [
+  { path: "/", label: "nav.home", icon: Home, match: (p) => p === "/" },
+  { path: "/plan", label: "nav.plan", icon: CalendarDays, match: (p) => p.startsWith("/plan") || p.startsWith("/tasks") || p.startsWith("/checkin") },
+  { path: "/uni", label: "nav.uni", icon: GraduationCap, match: (p) => p.startsWith("/uni") },
+  { path: "/focus", label: "nav.focus", icon: Timer, match: (p) => p.startsWith("/focus") },
+  { path: "/more", label: "nav.more", icon: Grid3x3, match: (p) => !["/", "/focus"].includes(p) && !/^\/(plan|tasks|checkin|uni)/.test(p) },
 ];
 
 function Screen() {
@@ -71,13 +72,13 @@ class ErrorBoundary extends Component<{ children: ReactNode; resetKey: string },
         <div className="screen">
           <div className="banner danger" style={{ marginTop: 40 }}>
             <div>
-              <b>Something went wrong on this screen.</b>
+              <b>{t("common.somethingWrong")}</b>
               <div className="small">{this.state.error.message}</div>
-              <div className="small">Your data is safe. Go back and try again.</div>
+              <div className="small">{t("common.dataSafe")}</div>
             </div>
           </div>
           <button className="btn block mt" onClick={() => go("/", { replace: true })}>
-            Go home
+            {t("common.goHome")}
           </button>
         </div>
       );
@@ -117,7 +118,8 @@ export function runTimerCheck() {
   if (!res) return;
   if (store().settings.focusSound && document.visibilityState === "visible") playChime();
   void haptic("success");
-  toast(res.finished.kind === "focus" ? `Focus session complete${res.xp ? ` · +${res.xp} XP` : ""}. Time for a ${res.next === "long_break" ? "long" : "short"} break.` : "Break over. Ready to focus?", res.xp ? "xp" : "info");
+  if (res.finished.kind === "focus") toast(res.xp ? t("focus.doneToastXp", { n: res.xp }) : t("focus.doneToast"), res.xp ? "xp" : "info");
+  else toast(t("focus.breakOver"));
 }
 
 let lastDay = todayISO();
@@ -140,28 +142,30 @@ function Onboarding() {
     if (askNotif && isNative()) {
       const ok = await requestNotificationPermission();
       const r = await syncDailyReminders(store().settings).catch(() => null);
-      toast(ok ? `Reminders on at ${s.settings.morningTime} and ${s.settings.eveningTime}${r && !r.exact ? " (approximate timing)" : ""}` : "Notifications stay off. You can enable them later in Settings.");
+      const times = { m: s.settings.morningTime, e: s.settings.eveningTime };
+      toast(ok ? t("onb.remindersOn", times) + (r && !r.exact ? t("onb.approx") : "") : t("onb.remindersOffToast"));
     }
   };
   return (
-    <Sheet open={open} onClose={() => finish(false)} title="Welcome to LIFEOS">
-      <p className="muted">Your personal operating system for university, programming, languages, fitness and habits. Everything is stored privately on this phone and works offline.</p>
+    <Sheet open={open} onClose={() => finish(false)} title={t("onb.title")}>
+      <Field label="🌐">
+        <LanguagePicker />
+      </Field>
+      <p className="muted">{t("onb.intro")}</p>
       <div className="mt-l">
-        <Field label="What should LIFEOS call you?">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" maxLength={40} />
+        <Field label={t("onb.name")}>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("onb.namePh")} maxLength={40} />
         </Field>
       </div>
       <div className="banner info">
-        <div>
-          LIFEOS can remind you at <b>{s.settings.morningTime}</b> to plan your day and at <b>{s.settings.eveningTime}</b> for your evening check-in. You can change or turn these off anytime in Settings.
-        </div>
+        <div>{t("onb.reminders", { m: s.settings.morningTime, e: s.settings.eveningTime })}</div>
       </div>
       <button className="btn primary block mt-l" onClick={() => finish(true)}>
-        {isNative() ? "Continue & enable reminders" : "Get started"}
+        {isNative() ? t("onb.continueReminders") : t("onb.start")}
       </button>
       {isNative() && (
         <button className="btn ghost block mt" onClick={() => finish(false)}>
-          Not now
+          {t("common.notNow")}
         </button>
       )}
     </Sheet>
@@ -171,15 +175,15 @@ function Onboarding() {
 /** Unlock achievements whenever data changes (debounced), wherever the change came from. */
 function useAchievementWatcher() {
   useEffect(() => {
-    let t: number | undefined;
+    let timer: number | undefined;
     const unsub = store().subscribe(() => {
-      clearTimeout(t);
-      t = window.setTimeout(() => {
-        for (const a of evaluateAchievements(store())) toast(`🏅 Achievement unlocked: ${a.title}`, "xp");
+      clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        for (const a of evaluateAchievements(store())) toast(t("toast.achievement", { title: a.title }), "xp");
       }, 400);
     });
     return () => {
-      clearTimeout(t);
+      clearTimeout(timer);
       unsub();
     };
   }, []);
@@ -190,18 +194,19 @@ export default function App() {
   useTheme();
   useTimerWatcher();
   useAchievementWatcher();
+  // Remount the UI when the language changes so every screen re-renders its text.
   return (
-    <div className="app">
+    <div className="app" key={currentLanguage()}>
       <ErrorBoundary resetKey={path}>
         <Screen />
       </ErrorBoundary>
-      <nav className="bottom-nav" aria-label="Main">
+      <nav className="bottom-nav" aria-label={t("a11y.nav")}>
         {NAV.map((n) => (
           <button key={n.path} className={n.match(path) ? "active" : ""} onClick={() => go(n.path)} aria-current={n.match(path) ? "page" : undefined}>
             <span className="pill">
               <n.icon size={22} />
             </span>
-            {n.label}
+            {t(n.label)}
           </button>
         ))}
       </nav>

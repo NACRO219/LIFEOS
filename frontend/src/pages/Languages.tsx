@@ -3,17 +3,19 @@ import { useEffect, useMemo, useState } from "react";
 import { BarChart } from "../components/charts";
 import { Bar, Card, confirmDialog, Empty, Field, NumberInput, Page, Section, Segmented, Stat, toast, xpToast } from "../components/ui";
 import { store, uid, useStore } from "../db/store";
-import { deleteLanguageSession, logLanguageSession } from "../lib/actions";
-import { addDays, prettyDay, todayISO, WEEKDAYS, weekday } from "../lib/date";
+import { t } from "../i18n";
+import { deleteLanguageSession, langName, logLanguageSession } from "../lib/actions";
+import { addDays, formatDuration, prettyDay, todayISO, weekday, weekdayShort } from "../lib/date";
 import { dueCards, hasTones, pinyinTones, reviewCard, stripTones } from "../lib/srs";
 import { languageMinutes, languageStreak, weekRange } from "../lib/stats";
 import type { LangCode, Skill, VocabCard } from "../lib/types";
 import { go } from "../router";
+import { skillLabel } from "./CheckIn";
 
-export const LANG_META: Record<LangCode, { name: string; flag: string; color: string; skills: Skill[]; levels: string[] }> = {
-  zh: { name: "Chinese", flag: "🇨🇳", color: "#e0405a", skills: ["listening", "speaking", "reading", "writing", "vocabulary", "hanzi", "pinyin", "tones"], levels: ["HSK 1", "HSK 2", "HSK 3", "HSK 4", "HSK 5", "HSK 6", "HSK 7–9"] },
-  en: { name: "English", flag: "🇬🇧", color: "#4f6bff", skills: ["listening", "speaking", "reading", "writing", "vocabulary", "grammar"], levels: ["A1", "A2", "B1", "B2", "C1", "C2"] },
-  fr: { name: "French", flag: "🇫🇷", color: "#7b5cff", skills: ["listening", "speaking", "reading", "writing", "vocabulary", "grammar"], levels: ["A1", "A2", "B1", "B2", "C1", "C2"] },
+export const LANG_META: Record<LangCode, { flag: string; color: string; skills: Skill[]; levels: string[] }> = {
+  zh: { flag: "🇨🇳", color: "#e0405a", skills: ["listening", "speaking", "reading", "writing", "vocabulary", "hanzi", "pinyin", "tones"], levels: ["HSK 1", "HSK 2", "HSK 3", "HSK 4", "HSK 5", "HSK 6", "HSK 7–9"] },
+  en: { flag: "🇬🇧", color: "#4f6bff", skills: ["listening", "speaking", "reading", "writing", "vocabulary", "grammar"], levels: ["A1", "A2", "B1", "B2", "C1", "C2"] },
+  fr: { flag: "🇫🇷", color: "#7b5cff", skills: ["listening", "speaking", "reading", "writing", "vocabulary", "grammar"], levels: ["A1", "A2", "B1", "B2", "C1", "C2"] },
 };
 const CORE_SKILLS: Skill[] = ["listening", "speaking", "reading", "writing"];
 
@@ -23,7 +25,7 @@ export default function Languages() {
   const { from, to } = weekRange(today);
   const days = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
   return (
-    <Page title="Languages" eyebrow={`${languageMinutes(s, from, to)} min this week`}>
+    <Page title={t("lng.title")} eyebrow={t("lng.weekMin", { n: languageMinutes(s, from, to) })}>
       <div className="col">
         {(["zh", "en", "fr"] as LangCode[]).map((code) => {
           const m = LANG_META[code];
@@ -37,13 +39,14 @@ export default function Languages() {
                 <div style={{ fontSize: 34 }}>{m.flag}</div>
                 <div className="grow">
                   <div className="row between">
-                    <b>{m.name}</b>
+                    <b>{langName(code)}</b>
                     <span className="tag">{prof?.level ?? ""}</span>
                   </div>
-                  <div className="small muted row gap-s">
-                    {min}/{goal} min today · <Flame size={13} /> {languageStreak(s, code, today)}d{due ? ` · ${due} cards due` : ""}
+                  <div className="small muted row gap-s wrap">
+                    <Flame size={13} /> {t("lng.todayLine", { n: min, goal, s: languageStreak(s, code, today) })}
+                    {due ? ` · ${t("lng.due", { n: due })}` : ""}
                   </div>
-                  <div className="mt" style={{ marginTop: 6 }}>
+                  <div style={{ marginTop: 6 }}>
                     <Bar value={goal ? min / goal : 0} tone={min >= goal ? "success" : undefined} />
                   </div>
                 </div>
@@ -52,9 +55,9 @@ export default function Languages() {
           );
         })}
       </div>
-      <Section title="Last 7 days">
+      <Section title={t("lng.last7")}>
         <Card>
-          <BarChart data={days.map((d) => ({ label: WEEKDAYS[weekday(d)], value: languageMinutes(s, d) }))} unit=" min" goal={s.settings.dailyGoals.languageMin} />
+          <BarChart data={days.map((d) => ({ label: weekdayShort(weekday(d)), value: languageMinutes(s, d) }))} unit=" min" goal={s.settings.dailyGoals.languageMin} />
         </Card>
       </Section>
     </Page>
@@ -67,17 +70,22 @@ export function LanguageDetail({ code }: { code: LangCode }) {
   const m = LANG_META[code];
   const s = useStore();
   const [tab, setTab] = useState<Tab>("practice");
-  if (!m) return <Page title="Language" showBack><Empty title="Unknown language" /></Page>;
+  if (!m)
+    return (
+      <Page title={t("lng.title")} showBack>
+        <Empty title={t("lng.unknown")} />
+      </Page>
+    );
   const prof = s.get("languages", code) ?? { id: code, level: m.levels[0], dailyGoalMin: 20, dailyReviewGoal: 10 };
   const opts: { value: Tab; label: string }[] = [
-    { value: "practice", label: "Practice" },
-    { value: "review", label: "Review" },
-    { value: "vocab", label: "Vocab" },
-    ...(code === "zh" ? [{ value: "tones" as Tab, label: "Tones" }] : []),
-    { value: "progress", label: "Progress" },
+    { value: "practice", label: t("lng.practice") },
+    { value: "review", label: t("lng.review") },
+    { value: "vocab", label: t("lng.vocab") },
+    ...(code === "zh" ? [{ value: "tones" as Tab, label: t("lng.tones") }] : []),
+    { value: "progress", label: t("lng.progress") },
   ];
   return (
-    <Page title={`${m.flag} ${m.name}`} eyebrow={prof.level} showBack>
+    <Page title={`${m.flag} ${langName(code)}`} eyebrow={prof.level} showBack>
       <Segmented value={tab} onChange={setTab} options={opts} />
       {tab === "practice" && <Practice code={code} />}
       {tab === "review" && <Review code={code} />}
@@ -113,86 +121,89 @@ function Practice({ code }: { code: LangCode }) {
     return () => clearInterval(id);
   }, [mine]);
   const elapsed = mine ? (mine.pausedAt ?? Date.now()) - mine.startedAt - mine.pausedMs : 0;
-  const sessions = s.all("langSessions").filter((l) => l.lang === code).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const sessions = s
+    .all("langSessions")
+    .filter((l) => l.lang === code)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const prof = s.get("languages", code);
+  const goal = prof?.dailyGoalMin ?? 20;
+  const todayMin = languageMinutes(s, today, today, code);
 
   const stop = () => {
     if (!mine) return;
     const minutes = Math.round(elapsed / 60000);
     s.setKv("langTimer", null);
-    if (minutes < 1) return toast("Session under a minute. Not logged.");
+    if (minutes < 1) return toast(t("lng.underMinute"));
     xpToast(logLanguageSession(store(), { lang: code, skill: mine.skill, minutes, date: today, notes, isLesson }));
-    toast(`${minutes} min of ${mine.skill} logged`);
+    toast(t("lng.loggedSkill", { skill: skillLabel(mine.skill), n: minutes }));
     setNotes("");
   };
   const logManual = () => {
-    if (!manual || manual <= 0 || manual > 600) return toast("Enter minutes between 1 and 600.", "error");
+    if (!manual || manual <= 0 || manual > 600) return toast(t("lng.errMinutes"), "error");
     xpToast(logLanguageSession(store(), { lang: code, skill, minutes: manual, date: today, notes, isLesson }));
     setManual(null);
     setNotes("");
-    toast("Session logged");
+    toast(t("lng.sessionLogged"));
   };
   return (
     <>
       <Card className="mt">
         <div className="row between small">
-          <span>Today</span>
-          <span className="faint">
-            {languageMinutes(s, today, today, code)}/{prof?.dailyGoalMin ?? 20} min
-          </span>
+          <span>{t("lng.today")}</span>
+          <span className="faint">{t("ch.minOf", { a: todayMin, b: goal })}</span>
         </div>
         <div className="mt">
-          <Bar value={(languageMinutes(s, today, today, code)) / Math.max(1, prof?.dailyGoalMin ?? 20)} />
+          <Bar value={todayMin / Math.max(1, goal)} />
         </div>
       </Card>
       <Card className="mt">
-        <Field label="Skill">
+        <Field label={t("lng.skill")}>
           <div className="chips">
             {m.skills.map((k) => (
               <button key={k} className={`chip ${(mine?.skill ?? skill) === k ? "on" : ""}`} disabled={!!mine} onClick={() => setSkill(k)}>
-                {k}
+                {skillLabel(k)}
               </button>
             ))}
           </div>
         </Field>
-        <div className="timer-face" style={{ fontSize: 56, margin: "10px 0 16px" }}>
+        <div className="timer-face" dir="ltr" style={{ fontSize: 56, margin: "10px 0 16px" }}>
           {String(Math.floor(elapsed / 60000)).padStart(2, "0")}:{String(Math.floor((elapsed % 60000) / 1000)).padStart(2, "0")}
         </div>
         <label className="row small" style={{ marginBottom: 12 }}>
-          <input type="checkbox" checked={isLesson} onChange={(e) => setIsLesson(e.target.checked)} /> Counts as a completed lesson (+{s.settings.xp.languageLesson} XP)
+          <input type="checkbox" checked={isLesson} onChange={(e) => setIsLesson(e.target.checked)} /> {t("lng.countsLesson", { n: s.settings.xp.languageLesson })}
         </label>
-        <input placeholder="Notes (what you practised)" value={notes} onChange={(e) => setNotes(e.target.value)} />
+        <input placeholder={t("lng.notesPh")} value={notes} onChange={(e) => setNotes(e.target.value)} />
         <div className="row mt">
           {!mine ? (
             <button className="btn primary grow" disabled={!!timer} onClick={() => s.setKv("langTimer", { lang: code, skill, startedAt: Date.now(), pausedMs: 0, pausedAt: null })}>
-              <Play size={18} /> {timer ? `${LANG_META[timer.lang].name} session running` : "Start session"}
+              <Play size={18} /> {timer ? t("lng.running", { lang: langName(timer.lang) }) : t("lng.start")}
             </button>
           ) : (
             <>
               {mine.pausedAt ? (
                 <button className="btn grow" onClick={() => s.setKv("langTimer", { ...mine, pausedMs: mine.pausedMs + (Date.now() - mine.pausedAt!), pausedAt: null })}>
-                  <Play size={18} /> Resume
+                  <Play size={18} /> {t("focus.resume")}
                 </button>
               ) : (
                 <button className="btn grow" onClick={() => s.setKv("langTimer", { ...mine, pausedAt: Date.now() })}>
-                  <Pause size={18} /> Pause
+                  <Pause size={18} /> {t("focus.pause")}
                 </button>
               )}
               <button className="btn primary grow" onClick={stop}>
-                <Square size={16} /> Finish & log
+                <Square size={16} /> {t("lng.finish")}
               </button>
             </>
           )}
         </div>
         <hr className="sep" />
         <div className="row">
-          <NumberInput value={manual} min={1} max={600} placeholder="Or log minutes manually" onChange={setManual} />
+          <NumberInput value={manual} min={1} max={600} placeholder={t("lng.manualPh")} onChange={setManual} />
           <button className="btn" onClick={logManual}>
-            Log
+            {t("lng.log")}
           </button>
         </div>
       </Card>
-      <Section title="Recent sessions">
+      <Section title={t("lng.recent")}>
         <Card className="tight">
           {sessions.length ? (
             <div className="list">
@@ -200,21 +211,25 @@ function Practice({ code }: { code: LangCode }) {
                 <div key={x.id} className="list-item">
                   <div className="grow">
                     <div className="title">
-                      {x.skill} · {x.minutes} min {x.isLesson && <span className="tag accent">Lesson</span>}
+                      {skillLabel(x.skill)} · {formatDuration(x.minutes)} {x.isLesson && <span className="tag accent">{t("lng.lesson")}</span>}
                     </div>
                     <div className="sub">
                       {prettyDay(x.date)}
                       {x.notes ? ` · ${x.notes}` : ""}
                     </div>
                   </div>
-                  <button className="icon-btn" aria-label="Delete session" onClick={async () => (await confirmDialog({ title: "Delete this session?", body: x.isLesson ? "Its XP will be removed." : undefined, confirm: "Delete", danger: true })) && deleteLanguageSession(store(), x.id)}>
+                  <button
+                    className="icon-btn"
+                    aria-label={t("common.delete")}
+                    onClick={async () => (await confirmDialog({ title: t("lng.deleteSession"), body: x.isLesson ? t("task.deleteXp") : undefined, confirm: t("common.delete"), danger: true })) && deleteLanguageSession(store(), x.id)}
+                  >
                     <Trash2 size={16} />
                   </button>
                 </div>
               ))}
             </div>
           ) : (
-            <Empty title="No sessions yet" text="Start a timed session or log minutes." />
+            <Empty title={t("lng.noSessions")} text={t("lng.noSessionsHint")} />
           )}
         </Card>
       </Section>
@@ -243,14 +258,24 @@ function Review({ code }: { code: LangCode }) {
     setRevealed(false);
     setCount((c) => c + 1);
   };
-  if (!cards.length) return <Card className="mt"><Empty icon={<BookOpen />} title="No vocabulary yet" text="Add words in the Vocab tab to start daily reviews." /></Card>;
+  if (!cards.length)
+    return (
+      <Card className="mt">
+        <Empty icon={<BookOpen />} title={t("lng.noVocab")} text={t("lng.noVocabHint")} />
+      </Card>
+    );
   return (
     <>
-      <div className="row between mt small">
-        <span className="muted">
-          Reviewed today: {reviewedToday}/{goal}
-        </span>
-        <Segmented value={mode} onChange={setMode} options={[{ value: "term", label: code === "zh" ? "汉字 → meaning" : "Word → meaning" }, { value: "meaning", label: "Meaning → word" }]} />
+      <div className="row between mt small wrap">
+        <span className="muted">{t("lng.reviewedToday", { n: reviewedToday, goal })}</span>
+        <Segmented
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: "term", label: code === "zh" ? t("lng.hanziToMeaning") : t("lng.termToMeaning") },
+            { value: "meaning", label: t("lng.meaningToTerm") },
+          ]}
+        />
       </div>
       <div className="mt">
         <Bar value={reviewedToday / Math.max(1, goal)} tone={reviewedToday >= goal ? "success" : undefined} />
@@ -258,31 +283,35 @@ function Review({ code }: { code: LangCode }) {
       {card ? (
         <Card className="mt flashcard" onClick={() => setRevealed(true)}>
           <div className="faint small">
-            {due.length} due · box {card.box}
+            {t("lng.cardMeta", { n: due.length, b: card.box })}
             {card.hsk ? ` · HSK ${card.hsk}` : ""}
           </div>
           {mode === "term" ? <div className={`term ${code === "zh" ? "zh" : ""}`}>{card.term}</div> : <div style={{ fontSize: 24, fontWeight: 600 }}>{card.meaning}</div>}
           {revealed ? (
             <>
               {mode === "meaning" && <div className={`term ${code === "zh" ? "zh" : ""}`}>{card.term}</div>}
-              {card.reading && <div style={{ fontSize: 22 }} className="muted">{card.reading}</div>}
+              {card.reading && (
+                <div style={{ fontSize: 22 }} className="muted">
+                  {card.reading}
+                </div>
+              )}
               {mode === "term" && <div style={{ fontSize: 20 }}>{card.meaning}</div>}
               <div className="row mt" style={{ width: "100%" }} onClick={(e) => e.stopPropagation()}>
                 <button className="btn danger grow" onClick={() => answer(false)}>
-                  Again
+                  {t("lng.again")}
                 </button>
                 <button className="btn primary grow" onClick={() => answer(true)}>
-                  Got it
+                  {t("lng.gotIt")}
                 </button>
               </div>
             </>
           ) : (
-            <small className="faint">Tap to reveal</small>
+            <small className="faint">{t("lng.tapReveal")}</small>
           )}
         </Card>
       ) : (
         <Card className="mt">
-          <Empty title="All caught up 🎉" text={count ? `You reviewed ${count} card(s) this session.` : "No cards are due today. Come back tomorrow."} />
+          <Empty title={t("lng.caughtUp")} text={count ? t("lng.reviewedSession", { n: count }) : t("lng.noneDue")} />
         </Card>
       )}
     </>
@@ -300,8 +329,8 @@ function Vocab({ code }: { code: LangCode }) {
     .filter((v) => !q || `${v.term} ${v.reading} ${v.meaning}`.toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const add = () => {
-    if (!f.term.trim() || !f.meaning.trim()) return toast("Word and meaning are required.", "error");
-    if (s.all("vocab").some((v) => v.lang === code && v.term.trim() === f.term.trim())) return toast("That word is already in your list.", "error");
+    if (!f.term.trim() || !f.meaning.trim()) return toast(t("lng.errCard"), "error");
+    if (s.all("vocab").some((v) => v.lang === code && v.term.trim() === f.term.trim())) return toast(t("lng.dupCard"), "error");
     const c: VocabCard = { id: uid(), lang: code, term: f.term.trim(), reading: f.reading.trim(), meaning: f.meaning.trim(), hsk: code === "zh" ? f.hsk : null, box: 0, nextReview: today, reviews: 0, correct: 0, createdAt: new Date().toISOString() };
     s.put("vocab", c);
     setF({ term: "", reading: "", meaning: "", hsk: f.hsk });
@@ -310,47 +339,49 @@ function Vocab({ code }: { code: LangCode }) {
     <>
       <Card className="mt">
         <div className="grid-2">
-          <Field label={code === "zh" ? "汉字 (Hanzi)" : "Word / phrase"}>
+          <Field label={code === "zh" ? t("lng.hanzi") : t("lng.word")}>
             <input value={f.term} onChange={(e) => setF({ ...f, term: e.target.value })} lang={code} />
           </Field>
-          <Field label={code === "zh" ? "Pinyin (with tones)" : "Pronunciation (optional)"} hint={code === "zh" ? "nǐ hǎo or ni3 hao3" : undefined}>
+          <Field label={code === "zh" ? t("lng.pinyin") : t("lng.pron")} hint={code === "zh" ? t("lng.pinyinHint") : undefined}>
             <input value={f.reading} onChange={(e) => setF({ ...f, reading: e.target.value })} />
           </Field>
-          <Field label="Meaning">
+          <Field label={t("lng.meaning")}>
             <input value={f.meaning} onChange={(e) => setF({ ...f, meaning: e.target.value })} />
           </Field>
           {code === "zh" && (
-            <Field label="HSK level">
+            <Field label={t("lng.hsk")}>
               <NumberInput value={f.hsk} min={1} max={9} onChange={(v) => setF({ ...f, hsk: v })} />
             </Field>
           )}
         </div>
         <button className="btn primary block" onClick={add}>
-          <Plus size={16} /> Add card
+          <Plus size={16} /> {t("lng.addCard")}
         </button>
       </Card>
-      <input className="mt" placeholder={`Search ${cards.length} cards`} value={q} onChange={(e) => setQ(e.target.value)} />
+      <input className="mt" placeholder={t("lng.searchCards", { n: cards.length })} value={q} onChange={(e) => setQ(e.target.value)} />
       <Card className="tight mt">
         {cards.length ? (
           <div className="list">
             {cards.slice(0, 200).map((v) => (
               <div key={v.id} className="list-item">
-                <div style={{ fontSize: code === "zh" ? 24 : 16, fontWeight: 600, minWidth: 56 }}>{v.term}</div>
+                <div style={{ fontSize: code === "zh" ? 24 : 16, fontWeight: 600, minWidth: 56 }} lang={code}>
+                  {v.term}
+                </div>
                 <div className="grow">
                   <div className="title ellipsis">{v.meaning}</div>
                   <div className="sub">
                     {v.reading}
-                    {v.hsk ? ` · HSK ${v.hsk}` : ""} · box {v.box} · {v.reviews ? `${Math.round((v.correct / v.reviews) * 100)}% correct` : "new"}
+                    {v.hsk ? ` · HSK ${v.hsk}` : ""} · {t("lng.cardLine", { b: v.box, acc: v.reviews ? t("lng.accuracy", { n: Math.round((v.correct / v.reviews) * 100) }) : t("lng.new") })}
                   </div>
                 </div>
-                <button className="icon-btn" aria-label="Delete card" onClick={() => s.remove("vocab", v.id)}>
+                <button className="icon-btn" aria-label={t("lng.deleteCard")} onClick={() => s.remove("vocab", v.id)}>
                   <Trash2 size={16} />
                 </button>
               </div>
             ))}
           </div>
         ) : (
-          <Empty title="No cards" />
+          <Empty title={t("lng.noCards")} />
         )}
       </Card>
     </>
@@ -363,25 +394,32 @@ function Tones() {
   const [idx, setIdx] = useState(() => Math.floor(Math.random() * 1e6));
   const [picked, setPicked] = useState<number[]>([]);
   const [score, setScore] = useState({ right: 0, total: 0 });
-  if (!pool.length) return <Card className="mt"><Empty title="No toned pinyin yet" text="Add Chinese words with tone marks (nǐ hǎo) or numbers (ni3 hao3) to practise tones." /></Card>;
+  if (!pool.length)
+    return (
+      <Card className="mt">
+        <Empty title={t("lng.noTones")} text={t("lng.noTonesHint")} />
+      </Card>
+    );
   const card = pool[idx % pool.length];
   const tones = pinyinTones(card.reading);
-  const syllables = stripTones(card.reading).split(/[\s'’\-]+/).filter(Boolean);
+  const syllables = stripTones(card.reading)
+    .split(/[\s'’\-]+/)
+    .filter(Boolean);
   const finished = picked.length >= tones.length;
-  const correct = finished && picked.every((t, i) => t === tones[i]);
-  const pick = (t: number) => {
+  const correct = finished && picked.every((x, i) => x === tones[i]);
+  const pick = (n: number) => {
     if (finished) return;
-    const next = [...picked, t];
+    const next = [...picked, n];
     setPicked(next);
     if (next.length === tones.length) setScore((sc) => ({ right: sc.right + (next.every((x, i) => x === tones[i]) ? 1 : 0), total: sc.total + 1 }));
   };
   return (
     <Card className="mt flashcard">
-      <div className="faint small">
-        Score {score.right}/{score.total} · tap the tone of each syllable
+      <div className="faint small">{t("lng.score", { r: score.right, t: score.total })}</div>
+      <div className="term zh" lang="zh">
+        {card.term}
       </div>
-      <div className="term zh">{card.term}</div>
-      <div style={{ fontSize: 22 }}>
+      <div style={{ fontSize: 22 }} dir="ltr">
         {syllables.map((syl, i) => (
           <span key={i} style={{ margin: "0 4px", color: i < picked.length ? (picked[i] === tones[i] ? "var(--success)" : "var(--danger)") : undefined }}>
             {syl}
@@ -390,19 +428,25 @@ function Tones() {
         ))}
       </div>
       {!finished ? (
-        <div className="grid-4" style={{ width: "100%", gridTemplateColumns: "repeat(5,1fr)" }}>
-          {[1, 2, 3, 4, 5].map((t) => (
-            <button key={t} className="btn" onClick={() => pick(t)}>
-              {["ˉ", "ˊ", "ˇ", "ˋ", "·"][t - 1]} {t}
+        <div className="grid-4" style={{ width: "100%", gridTemplateColumns: "repeat(5,1fr)" }} dir="ltr">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button key={n} className="btn" onClick={() => pick(n)}>
+              {["ˉ", "ˊ", "ˇ", "ˋ", "·"][n - 1]} {n}
             </button>
           ))}
         </div>
       ) : (
         <>
-          <div className={correct ? "tag success" : "tag danger"}>{correct ? "Correct!" : `Answer: ${card.reading}`}</div>
+          <div className={correct ? "tag success" : "tag danger"}>{correct ? t("lng.correct") : t("lng.answer", { a: card.reading })}</div>
           <div>{card.meaning}</div>
-          <button className="btn primary" onClick={() => { setPicked([]); setIdx((i) => i + 1 + Math.floor(Math.random() * 3)); }}>
-            Next
+          <button
+            className="btn primary"
+            onClick={() => {
+              setPicked([]);
+              setIdx((i) => i + 1 + Math.floor(Math.random() * 3));
+            }}
+          >
+            {t("lng.next")}
           </button>
         </>
       )}
@@ -416,67 +460,67 @@ function Progress({ code }: { code: LangCode }) {
   const today = todayISO();
   const prof = s.get("languages", code) ?? { id: code, level: m.levels[0], dailyGoalMin: 20, dailyReviewGoal: 10 };
   const sessions = s.all("langSessions").filter((l) => l.lang === code);
-  const bySkill = m.skills.map((k) => ({ label: k.slice(0, 5), value: sessions.filter((x) => x.skill === k).reduce((a, x) => a + x.minutes, 0) }));
+  const bySkill = m.skills.map((k) => ({ label: skillLabel(k).slice(0, 5), value: sessions.filter((x) => x.skill === k).reduce((a, x) => a + x.minutes, 0) }));
   const total = sessions.reduce((a, x) => a + x.minutes, 0);
   const cards = s.all("vocab").filter((v) => v.lang === code);
   const mastered = cards.filter((v) => v.box >= 4).length;
   const days = Array.from({ length: 28 }, (_, i) => addDays(today, i - 27));
   const save = (patch: Partial<typeof prof>) => s.put("languages", { ...prof, ...patch });
+  const coreMax = Math.max(1, ...CORE_SKILLS.map((k) => sessions.filter((x) => x.skill === k).reduce((a, x) => a + x.minutes, 0)));
   return (
     <>
       <div className="grid-3 mt">
-        <Stat label="Total" value={`${Math.round(total / 6) / 10}h`} />
-        <Stat label="Streak" value={`${languageStreak(s, code, today)}d`} />
-        <Stat label="Cards" value={cards.length} sub={`${mastered} mastered`} />
+        <Stat label={t("lng.total")} value={formatDuration(total)} />
+        <Stat label={t("lng.streak")} value={t("xp.daysShort", { n: languageStreak(s, code, today) })} />
+        <Stat label={t("lng.cards")} value={cards.length} sub={t("lng.mastered", { n: mastered })} />
       </div>
-      <Section title="Four skills">
+      <Section title={t("lng.fourSkills")}>
         <Card>
           {CORE_SKILLS.map((k) => {
             const v = sessions.filter((x) => x.skill === k).reduce((a, x) => a + x.minutes, 0);
-            const max = Math.max(1, ...CORE_SKILLS.map((kk) => sessions.filter((x) => x.skill === kk).reduce((a, x) => a + x.minutes, 0)));
             return (
               <div key={k} className="col gap-s" style={{ marginBottom: 10 }}>
                 <div className="row between small">
-                  <span style={{ textTransform: "capitalize" }}>{k}</span>
-                  <span className="faint">{v} min</span>
+                  <span>{skillLabel(k)}</span>
+                  <span className="faint">{formatDuration(v)}</span>
                 </div>
-                <Bar value={v / max} />
+                <Bar value={v / coreMax} />
               </div>
             );
           })}
-          <small className="faint">Balanced practice across all four skills builds real fluency.</small>
+          <small className="faint">{t("lng.balanced")}</small>
         </Card>
       </Section>
-      <Section title="Minutes by skill">
+      <Section title={t("lng.bySkill")}>
         <Card>
           <BarChart data={bySkill} unit=" min" color={m.color} />
         </Card>
       </Section>
-      <Section title="Last 4 weeks">
+      <Section title={t("lng.last4")}>
         <Card>
           <div className="heat">
             {days.map((d) => {
               const v = languageMinutes(s, d, d, code);
               const a = v === 0 ? 0 : v >= prof.dailyGoalMin ? 1 : 0.45;
-              return <i key={d} title={`${d}: ${v} min`} style={{ background: a ? m.color : undefined, opacity: a ? 0.35 + a * 0.65 : 1 }} />;
+              return <i key={d} title={`${prettyDay(d)}: ${formatDuration(v)}`} style={{ background: a ? m.color : undefined, opacity: a ? 0.35 + a * 0.65 : 1 }} />;
             })}
           </div>
         </Card>
       </Section>
-      <Section title="Goals & level">
+      <Section title={t("lng.goals")}>
         <Card>
           <div className="grid-2">
-            <Field label="Current level">
+            <Field label={t("lng.level")}>
               <select value={prof.level} onChange={(e) => save({ level: e.target.value })}>
                 {m.levels.map((l) => (
                   <option key={l}>{l}</option>
                 ))}
               </select>
             </Field>
-            <Field label="Daily goal (min)">
+            <Field label={t("lng.dailyGoal")}>
               <NumberInput value={prof.dailyGoalMin} min={0} max={600} onChange={(v) => save({ dailyGoalMin: v ?? 0 })} />
             </Field>
-            <Field label="Daily reviews">
+            <Field label={t("lng.dailyReviews")}>
               <NumberInput value={prof.dailyReviewGoal} min={0} max={500} onChange={(v) => save({ dailyReviewGoal: v ?? 0 })} />
             </Field>
           </div>

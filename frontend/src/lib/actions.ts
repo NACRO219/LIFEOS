@@ -2,8 +2,9 @@
 // XP events use deterministic keys (e.g. "task:<id>") so the same event can never be awarded twice;
 // undoing an action revokes its XP so totals always match confirmed progress.
 import type { Store } from "../db/store";
+import { t as tr } from "../i18n";
 import { uid } from "../db/store";
-import { localDay, todayISO } from "./date";
+import { addDays, diffDays, localDay, todayISO } from "./date";
 import { dailyChallenges, evaluateAchievements, weeklyChallenges } from "./gamification";
 import { nextRecurrence } from "./planner";
 import { weekRange } from "./stats";
@@ -59,11 +60,11 @@ export function newTask(partial: Partial<Task> & { title: string }): Task {
 }
 
 export function validateTask(t: Partial<Task>): string | null {
-  if (!t.title || !t.title.trim()) return "Give the task a title.";
-  if (t.title.length > 200) return "Title is too long (max 200 characters).";
-  if (t.estimatedMin !== undefined && (t.estimatedMin < 0 || t.estimatedMin > 24 * 60)) return "Estimated duration must be between 0 and 1440 minutes.";
-  if (t.xp !== undefined && (t.xp < 0 || t.xp > 1000)) return "XP must be between 0 and 1000.";
-  if (t.deadline && t.scheduledDate && t.scheduledDate > t.deadline) return "Scheduled date is after the deadline.";
+  if (!t.title || !t.title.trim()) return tr("task.err.title");
+  if (t.title.length > 200) return tr("task.err.long");
+  if (t.estimatedMin !== undefined && (t.estimatedMin < 0 || t.estimatedMin > 24 * 60)) return tr("task.err.estimate");
+  if (t.xp !== undefined && (t.xp < 0 || t.xp > 1000)) return tr("task.err.xp");
+  if (t.deadline && t.scheduledDate && t.scheduledDate > t.deadline) return tr("task.err.schedule");
   return null;
 }
 
@@ -89,15 +90,23 @@ export function completeTask(s: Store, id: string): AwardResult {
     const now = new Date().toISOString();
     const today = todayISO();
     s.put("tasks", { ...t, status: "done", completedAt: now });
-    award(s, `task:${t.id}`, taskXp(t, s.settings.xp), `Completed “${t.title}”`, "task", today);
+    award(s, `task:${t.id}`, taskXp(t, s.settings.xp), t.title, "task", today);
     // Recurring: create the next instance once (never duplicates if toggled again).
     if (t.recurrence !== "none") {
       const base = t.scheduledDate ?? t.deadline ?? today;
-      const next = nextRecurrence(base, t.recurrence);
+      const anchor = t.recurrence === "monthly" ? Math.max(t.recurrenceAnchorDay ?? 0, Number(base.slice(8, 10))) : undefined;
+      const next = nextRecurrence(base, t.recurrence, anchor);
       const exists = s.all("tasks").some((x) => x.recurrenceParentId === t.id);
       if (next && !exists) {
-        const shift = (d: string | null) => (d ? nextRecurrence(d, t.recurrence) : null);
-        s.put("tasks", { ...t, id: uid(), status: "todo", completedAt: null, createdAt: now, recurrenceParentId: t.id, scheduledDate: t.scheduledDate ? next : null, deadline: shift(t.deadline) });
+        let deadline: string | null = null;
+        if (t.deadline) {
+          if (!t.scheduledDate) deadline = next; // the deadline is the base date
+          else if (t.recurrence === "monthly") deadline = addDays(next, diffDays(t.scheduledDate, t.deadline)); // keep the gap; no drift
+          else deadline = nextRecurrence(t.deadline, t.recurrence);
+        }
+        // A recurring task with no dates at all gets scheduled, otherwise its next instance never shows up as "today".
+        const scheduledDate = t.scheduledDate || !t.deadline ? next : null;
+        s.put("tasks", { ...t, id: uid(), status: "todo", completedAt: null, createdAt: now, recurrenceParentId: t.id, recurrenceAnchorDay: anchor, scheduledDate, deadline });
       }
     }
     checkPriorities(s, today);
@@ -133,7 +142,7 @@ export function checkPriorities(s: Store, date: string) {
   const key = `priorities:${date}`;
   const ids = plan?.priorityTaskIds ?? [];
   const tasks = ids.map((id) => s.get("tasks", id)).filter(Boolean) as Task[];
-  if (ids.length > 0 && tasks.length === ids.length && tasks.every((t) => t.status === "done")) award(s, key, s.settings.xp.allPriorities, "All daily priorities completed", "priorities", date);
+  if (ids.length > 0 && tasks.length === ids.length && tasks.every((t) => t.status === "done")) award(s, key, s.settings.xp.allPriorities, "", "priorities", date);
   else revoke(s, key);
 }
 
@@ -154,7 +163,7 @@ export function solveExercise(s: Store, ex: CodingExercise): AwardResult {
   s.transact(() => {
     const solvedAt = ex.solvedAt ?? new Date().toISOString();
     s.put("exercises", { ...ex, status: "solved", solvedAt });
-    award(s, `exercise:${ex.id}`, s.settings.xp.programmingExercise, `Solved “${ex.title}”`, "exercise", localDay(solvedAt));
+    award(s, `exercise:${ex.id}`, s.settings.xp.programmingExercise, ex.title, "exercise", localDay(solvedAt));
   });
   return finish(s, before);
 }
@@ -174,7 +183,7 @@ export function logLanguageSession(s: Store, session: Omit<LanguageSession, "id"
   const id = uid();
   s.transact(() => {
     s.put("langSessions", { ...session, id, createdAt: new Date().toISOString() });
-    if (session.isLesson) award(s, `lang:${id}`, s.settings.xp.languageLesson, `${langName(session.lang)} lesson (${session.skill})`, "language", session.date);
+    if (session.isLesson) award(s, `lang:${id}`, s.settings.xp.languageLesson, `${session.lang}:${session.skill}`, "language", session.date);
   });
   return finish(s, before);
 }
@@ -191,7 +200,7 @@ export function saveWorkout(s: Store, w: Workout): AwardResult {
   const before = sumXp(s);
   s.transact(() => {
     s.put("workouts", w);
-    award(s, `workout:${w.id}`, s.settings.xp.workout, `Workout: ${w.name || "training"}`, "workout", w.date);
+    award(s, `workout:${w.id}`, s.settings.xp.workout, w.name || "", "workout", w.date);
   });
   return finish(s, before);
 }
@@ -208,14 +217,14 @@ export function recordFocusSession(s: Store, f: FocusSession): AwardResult {
   const before = sumXp(s);
   s.transact(() => {
     s.put("focusSessions", f);
-    if (f.kind === "focus" && f.completed && f.actualMin >= 10) award(s, `focus:${f.id}`, s.settings.xp.focusSession, `Focus session (${f.actualMin} min)`, "focus", f.date);
+    if (f.kind === "focus" && f.completed && f.actualMin >= 10) award(s, `focus:${f.id}`, s.settings.xp.focusSession, `min:${f.actualMin}`, "focus", f.date);
   });
   return finish(s, before);
 }
 
 export function completeEveningReview(s: Store, date: string): AwardResult {
   const before = sumXp(s);
-  award(s, `evening:${date}`, s.settings.xp.eveningReview, "Evening review completed", "evening", date);
+  award(s, `evening:${date}`, s.settings.xp.eveningReview, "", "evening", date);
   return finish(s, before);
 }
 
@@ -226,19 +235,19 @@ export function syncChallengeXp(s: Store) {
   s.transact(() => {
     for (const c of dailyChallenges(s, today)) {
       const key = `challenge:day:${today}:${c.id}`;
-      if (c.progress >= 1) award(s, key, c.xp, `Daily challenge: ${c.title}`, "challenge", today);
+      if (c.progress >= 1) award(s, key, c.xp, c.title, "challenge", today);
       else revoke(s, key);
     }
     for (const c of weeklyChallenges(s, today)) {
       const key = `challenge:week:${wk}:${c.id}`;
-      if (c.progress >= 1) award(s, key, c.xp, `Weekly challenge: ${c.title}`, "challenge", today);
+      if (c.progress >= 1) award(s, key, c.xp, c.title, "challenge", today);
       else revoke(s, key);
     }
   });
 }
 
 export function langName(code: string) {
-  return code === "zh" ? "Chinese" : code === "en" ? "English" : code === "fr" ? "French" : code;
+  return code === "zh" || code === "en" || code === "fr" ? tr(`lang.${code}`) : code;
 }
 
 export function toggleHabit(s: Store, habitId: string, date: string) {

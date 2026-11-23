@@ -1,12 +1,12 @@
 import { ListTodo, Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
-import { TaskRow, TaskSheet } from "../components/tasks";
+import { catLabel, TaskRow, TaskSheet } from "../components/tasks";
 import { Card, Empty, Page, Segmented } from "../components/ui";
-import { useCollection } from "../db/store";
-import { addDays, prettyDay, relativeDay, todayISO } from "../lib/date";
+import { store, useCollection } from "../db/store";
+import { t } from "../i18n";
+import { prettyDay, relativeDay, todayISO } from "../lib/date";
 import { isOpen, isOverdue, scoreTask } from "../lib/planner";
 import { todaysTasks } from "../lib/stats";
-import { store } from "../db/store";
 import { CATEGORIES, type Task } from "../lib/types";
 import { go } from "../router";
 
@@ -29,47 +29,46 @@ export default function Tasks() {
         l = todaysTasks(store(), today);
         break;
       case "upcoming":
-        l = tasks.filter((t) => isOpen(t) && ((t.scheduledDate ?? t.deadline ?? "") > today));
+        l = tasks.filter((x) => isOpen(x) && (x.scheduledDate ?? x.deadline ?? "") > today);
         break;
       case "overdue":
-        l = tasks.filter((t) => isOverdue(t, today));
+        l = tasks.filter((x) => isOverdue(x, today));
         break;
       case "done":
-        l = tasks.filter((t) => t.status === "done").sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""));
+        l = tasks.filter((x) => x.status === "done").sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""));
         break;
       default:
         l = tasks.filter(isOpen);
     }
-    if (cat !== "All") l = l.filter((t) => t.category === cat);
+    if (cat !== "All") l = l.filter((x) => x.category === cat);
     if (q.trim()) {
       const needle = q.trim().toLowerCase();
-      l = l.filter((t) => t.title.toLowerCase().includes(needle) || t.description.toLowerCase().includes(needle) || t.project.toLowerCase().includes(needle));
+      l = l.filter((x) => x.title.toLowerCase().includes(needle) || x.description.toLowerCase().includes(needle) || x.project.toLowerCase().includes(needle));
     }
     if (view !== "done") l = [...l].sort((a, b) => Number(a.status === "done") - Number(b.status === "done") || scoreTask(b, today, courses).score - scoreTask(a, today, courses).score);
     return l;
   }, [tasks, courses, view, cat, q, today]);
 
-  const overdueCount = tasks.filter((t) => isOverdue(t, today)).length;
+  const overdueCount = tasks.filter((x) => isOverdue(x, today)).length;
 
-  // Group upcoming by date
   const groups = useMemo(() => {
     if (view !== "upcoming") return null;
     const m = new Map<string, Task[]>();
-    for (const t of list) {
-      const d = t.scheduledDate ?? t.deadline ?? "Unscheduled";
+    for (const x of list) {
+      const d = x.scheduledDate ?? x.deadline ?? "~";
       if (!m.has(d)) m.set(d, []);
-      m.get(d)!.push(t);
+      m.get(d)!.push(x);
     }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [list, view]);
 
   return (
     <Page
-      title="Tasks"
-      eyebrow={`${tasks.filter(isOpen).length} open`}
+      title={t("tasks.title")}
+      eyebrow={t("tasks.open", { n: tasks.filter(isOpen).length })}
       actions={
         <button className="btn small" onClick={() => go("/plan")}>
-          Planner
+          {t("tasks.planner")}
         </button>
       }
     >
@@ -77,23 +76,23 @@ export default function Tasks() {
         value={view}
         onChange={setView}
         options={[
-          { value: "today", label: "Today" },
-          { value: "upcoming", label: "Upcoming" },
-          { value: "overdue", label: `Overdue${overdueCount ? ` (${overdueCount})` : ""}` },
-          { value: "all", label: "All" },
-          { value: "done", label: "Done" },
+          { value: "today", label: t("tasks.today") },
+          { value: "upcoming", label: t("tasks.upcoming") },
+          { value: "overdue", label: overdueCount ? t("tasks.overdueN", { n: overdueCount }) : t("tasks.overdue") },
+          { value: "all", label: t("tasks.all") },
+          { value: "done", label: t("tasks.done") },
         ]}
       />
       <div className="row mt">
-        <div className="grow" style={{ position: "relative" }}>
-          <Search size={16} style={{ position: "absolute", left: 12, top: 14, color: "var(--text-3)" }} />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tasks" style={{ paddingLeft: 36 }} />
+        <div className="grow search-box">
+          <Search size={16} className="search-icon" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("tasks.search")} />
         </div>
       </div>
       <div className="chips mt">
         {["All", ...CATEGORIES].map((c) => (
           <button key={c} className={`chip ${cat === c ? "on" : ""}`} onClick={() => setCat(c)}>
-            {c}
+            {c === "All" ? t("common.all") : catLabel(c)}
           </button>
         ))}
       </div>
@@ -102,12 +101,12 @@ export default function Tasks() {
         {list.length === 0 ? (
           <Empty
             icon={<ListTodo />}
-            title={view === "overdue" ? "Nothing overdue" : view === "done" ? "No completed tasks yet" : "No tasks here"}
-            text={view === "today" ? "Tasks planned for today, due today, or carried over show here." : undefined}
+            title={view === "overdue" ? t("tasks.emptyOverdue") : view === "done" ? t("tasks.emptyDone") : t("tasks.empty")}
+            text={view === "today" ? t("tasks.emptyTodayHint") : undefined}
             action={
               view !== "done" && (
                 <button className="btn primary small" onClick={() => setAdding(true)}>
-                  <Plus size={16} /> Add task
+                  <Plus size={16} /> {t("task.add")}
                 </button>
               )
             }
@@ -116,26 +115,25 @@ export default function Tasks() {
           groups.map(([d, ts]) => (
             <div key={d}>
               <div className="small faint" style={{ padding: "10px 2px 0", fontWeight: 650 }}>
-                {d === "Unscheduled" ? d : `${relativeDay(d, today)} · ${prettyDay(d)}`}
-                {d === addDays(today, 1) ? "" : ""}
+                {d === "~" ? t("tasks.unscheduled") : `${relativeDay(d, today)} · ${prettyDay(d)}`}
               </div>
               <div className="list">
-                {ts.map((t) => (
-                  <TaskRow key={t.id} task={t} onOpen={setEditing} />
+                {ts.map((x) => (
+                  <TaskRow key={x.id} task={x} onOpen={setEditing} />
                 ))}
               </div>
             </div>
           ))
         ) : (
           <div className="list">
-            {list.map((t) => (
-              <TaskRow key={t.id} task={t} onOpen={setEditing} />
+            {list.map((x) => (
+              <TaskRow key={x.id} task={x} onOpen={setEditing} />
             ))}
           </div>
         )}
       </Card>
 
-      <button className="fab" aria-label="Add task" onClick={() => setAdding(true)}>
+      <button className="fab" aria-label={t("task.add")} onClick={() => setAdding(true)}>
         <Plus size={26} />
       </button>
       <TaskSheet open={adding} onClose={() => setAdding(false)} defaults={{ scheduledDate: view === "today" ? today : null, category: cat !== "All" ? (cat as Task["category"]) : "Personal" }} />

@@ -123,6 +123,11 @@ describe("planner", () => {
     expect(nextRecurrence("2026-01-31", "monthly")).toBe("2026-02-28");
     expect(nextRecurrence(T, "none")).toBeNull();
   });
+  it("monthly recurrence keeps its intended day after a short month", () => {
+    expect(nextRecurrence("2026-02-28", "monthly", 31)).toBe("2026-03-31");
+    expect(nextRecurrence("2026-04-30", "monthly", 31)).toBe("2026-05-31");
+    expect(nextRecurrence("2026-03-15", "monthly", 31)).toBe("2026-04-15"); // moved by the user: follow it
+  });
 });
 
 // ------------------------------------------------------------------ store + XP
@@ -241,6 +246,61 @@ describe("store and XP rules", () => {
     await other.restoreBackup(json);
     expect(other.all("tasks").map((t) => t.title)).toEqual(["backed up"]);
     expect(other.settings.name).toBe("Lin");
+  });
+
+  it("a failed restore leaves the existing data untouched (atomic)", async () => {
+    const mem = new MemoryBackend();
+    const st = new Store(mem);
+    await st.init();
+    st.put("tasks", task({ title: "keep me" }));
+    await st.flush();
+    const backup = JSON.parse(JSON.stringify({ ...st.exportBackup(), collections: { tasks: [task({ title: "new" })] } }));
+    mem.write = async () => {
+      throw new Error("disk full");
+    };
+    await expect(st.restoreBackup(backup)).rejects.toThrow("disk full");
+    expect(st.all("tasks").map((t) => t.title)).toEqual(["keep me"]);
+    expect([...mem.records.values()].some((r) => r.data.includes("keep me"))).toBe(true);
+  });
+
+  it("a throwing transaction rolls back memory and persists nothing", async () => {
+    s.put("tasks", task({ title: "before" }));
+    await s.flush();
+    const t0 = s.all("tasks")[0];
+    const backend = s.backend as MemoryBackend;
+    const rowsBefore = backend.records.size;
+    expect(() =>
+      s.transact(() => {
+        s.update("tasks", t0.id, { title: "changed" });
+        s.put("tasks", task({ title: "added" }));
+        s.saveSettings({ name: "X" });
+        s.setKv("k", 1);
+        throw new Error("boom");
+      }),
+    ).toThrow("boom");
+    await s.flush();
+    expect(s.all("tasks").map((t) => t.title)).toEqual(["before"]);
+    expect(s.settings.name).not.toBe("X");
+    expect(s.getKv("k")).toBeNull();
+    expect(backend.records.size).toBe(rowsBefore);
+  });
+
+  it("recurring tasks without dates get scheduled; monthly ones don't drift", () => {
+    const undated = task({ title: "undated", recurrence: "daily" });
+    s.put("tasks", undated);
+    completeTask(s, undated.id);
+    const child = s.all("tasks").find((x) => x.recurrenceParentId === undated.id)!;
+    expect(child.scheduledDate).toBe(addDays(todayISO(), 1));
+
+    const rent = task({ title: "rent", recurrence: "monthly", scheduledDate: "2026-01-31", deadline: "2026-02-02" });
+    s.put("tasks", rent);
+    completeTask(s, rent.id);
+    const feb = s.all("tasks").find((x) => x.recurrenceParentId === rent.id)!;
+    expect(feb.scheduledDate).toBe("2026-02-28");
+    expect(feb.deadline).toBe("2026-03-02"); // 2-day gap kept
+    completeTask(s, feb.id);
+    const mar = s.all("tasks").find((x) => x.recurrenceParentId === feb.id)!;
+    expect(mar.scheduledDate).toBe("2026-03-31");
   });
 
   it("reset wipes data and re-seeds", async () => {

@@ -124,7 +124,10 @@ Copy-Item .env.example .env      # set LIFEOS_SYNC_TOKEN to enable phone backups
 pytest                           # tests
 uvicorn app.main:app --host 0.0.0.0 --port 8000   # 0.0.0.0 so the phone can reach it over Wi-Fi
 ```
-API docs: http://127.0.0.1:8000/docs. The database is migrated automatically on start (a timestamped
+API docs: http://127.0.0.1:8000/docs. When `LIFEOS_SYNC_TOKEN` is set, every `/api/*` endpoint except
+`/api/health` requires `Authorization: Bearer <token>`, so a server listening on `0.0.0.0` can't be read
+or changed by others on the network. Without a token the data endpoints are open: only do that on localhost.
+The database is migrated automatically on start (a timestamped
 copy of `lifeos.db` is made before any migration).
 
 ## Known limitations

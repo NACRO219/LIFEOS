@@ -22,6 +22,7 @@ export function defaultSettings(): Settings {
     name: "",
     timezone: "device",
     theme: "system",
+    language: "auto",
     morningEnabled: true,
     morningTime: "07:00",
     eveningEnabled: true,

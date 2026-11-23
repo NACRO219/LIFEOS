@@ -16,11 +16,12 @@ def client(tmp_path, monkeypatch):
     database.reset_engine()
     from app.main import app
 
-    with TestClient(app) as c:
+    with TestClient(app, headers=AUTH) as c:  # authenticated by default; tests opt out explicitly
         yield c
     database.reset_engine()
 
 
+NO_AUTH = {"Authorization": ""}
 AUTH = {"Authorization": "Bearer test-token-0123456789abcdef"}
 
 
@@ -73,7 +74,7 @@ def test_checkin_once_per_day(client):
 
 def test_backup_requires_token_and_roundtrips(client):
     backup = {"format": "lifeos-backup", "schemaVersion": 2, "exportedAt": "2026-11-23T00:00:00Z", "settings": {}, "collections": {"tasks": [{"id": "a", "title": "x"}]}}
-    assert client.put("/api/backup", json=backup).status_code == 401
+    assert client.put("/api/backup", json=backup, headers=NO_AUTH).status_code == 401
     assert client.put("/api/backup", json=backup, headers={"Authorization": "Bearer wrong"}).status_code == 401
     assert client.get("/api/backup", headers=AUTH).status_code == 404
     assert client.put("/api/backup", json={"hello": 1}, headers=AUTH).status_code == 422
@@ -118,3 +119,23 @@ def test_migration_upgrades_old_database_and_backs_it_up(tmp_path, monkeypatch):
     database.reset_engine()
     backups = [p for p in os.listdir(tmp_path) if p.startswith("old.db.bak-")]
     assert len(backups) == 1
+
+
+def test_data_endpoints_require_token_when_configured(client):
+    assert client.get("/api/tasks", headers=NO_AUTH).status_code == 401
+    assert client.post("/api/tasks", json={"title": "x"}, headers=NO_AUTH).status_code == 401
+    assert client.delete("/api/courses/1", headers={"Authorization": "Bearer wrong"}).status_code == 401
+    assert client.get("/api/dashboard", headers=NO_AUTH).status_code == 401
+    assert client.get("/api/health", headers=NO_AUTH).status_code == 200  # health stays public
+    assert client.get("/api/tasks").status_code == 200
+
+
+def test_backup_rejects_oversized_and_non_utf8_bodies(client, monkeypatch):
+    from app import main
+
+    monkeypatch.setattr(main, "MAX_BACKUP_BYTES", 100)
+    big = {"format": "lifeos-backup", "collections": {"tasks": [{"id": "a", "title": "x" * 200}]}}
+    assert client.put("/api/backup", json=big).status_code == 413
+    bad = json.dumps({"format": "lifeos-backup", "collections": {}}).encode("utf-16")
+    monkeypatch.setattr(main, "MAX_BACKUP_BYTES", 10_000)
+    assert client.put("/api/backup", content=bad, headers={"Content-Type": "application/json"}).status_code == 422

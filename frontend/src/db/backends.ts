@@ -17,11 +17,15 @@ export interface StorageBackend {
   readonly kind: "sqlite" | "indexeddb" | "memory";
   init(): Promise<void>;
   loadAll(): Promise<StoredRecord[]>;
-  /** Apply a batch atomically. `data === null` deletes. */
-  write(batch: { collection: string; id: string; data: string | null }[]): Promise<void>;
+  /** Apply a batch atomically. `data === null` deletes. `clear` wipes every record first, in the same transaction. */
+  write(batch: { collection: string; id: string; data: string | null }[], opts?: WriteOptions): Promise<void>;
   clear(): Promise<void>;
   getMeta(key: string): Promise<string | null>;
   setMeta(key: string, value: string): Promise<void>;
+}
+
+export interface WriteOptions {
+  clear?: boolean;
 }
 
 const DB_NAME = "lifeos";
@@ -59,10 +63,10 @@ export class SqliteBackend implements StorageBackend {
     return (res.values ?? []) as StoredRecord[];
   }
 
-  async write(batch: { collection: string; id: string; data: string | null }[]) {
-    if (!batch.length) return;
+  async write(batch: { collection: string; id: string; data: string | null }[], opts: WriteOptions = {}) {
+    if (!batch.length && !opts.clear) return;
     const now = Date.now();
-    const set = batch.map((b) =>
+    const set: { statement: string; values: unknown[] }[] = batch.map((b) =>
       b.data === null
         ? { statement: "DELETE FROM records WHERE collection = ? AND id = ?", values: [b.collection, b.id] }
         : {
@@ -72,6 +76,9 @@ export class SqliteBackend implements StorageBackend {
             values: [b.collection, b.id, b.data, now],
           },
     );
+    // executeSet(…, true) runs every statement in one SQLite transaction, so the wipe and the
+    // new rows commit together or not at all.
+    if (opts.clear) set.unshift({ statement: "DELETE FROM records", values: [] });
     await this.db.executeSet(set, true);
   }
 
@@ -131,10 +138,11 @@ export class IndexedDbBackend implements StorageBackend {
     return ((await this.tx<StoredRecord[]>(["records"], "readonly", (t) => t.objectStore("records").getAll())) ?? []) as StoredRecord[];
   }
 
-  async write(batch: { collection: string; id: string; data: string | null }[]) {
-    if (!batch.length) return;
+  async write(batch: { collection: string; id: string; data: string | null }[], opts: WriteOptions = {}) {
+    if (!batch.length && !opts.clear) return;
     await this.tx(["records"], "readwrite", (t) => {
       const s = t.objectStore("records");
+      if (opts.clear) s.clear();
       for (const b of batch) {
         if (b.data === null) s.delete([b.collection, b.id]);
         else s.put({ collection: b.collection, id: b.id, data: b.data });
@@ -168,7 +176,8 @@ export class MemoryBackend implements StorageBackend {
   async loadAll() {
     return [...this.records.values()];
   }
-  async write(batch: { collection: string; id: string; data: string | null }[]) {
+  async write(batch: { collection: string; id: string; data: string | null }[], opts: WriteOptions = {}) {
+    if (opts.clear) this.records.clear();
     for (const b of batch) {
       const k = `${b.collection}\u0000${b.id}`;
       if (b.data === null) this.records.delete(k);

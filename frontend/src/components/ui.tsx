@@ -1,5 +1,6 @@
 import { ChevronLeft, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
+import { t } from "../i18n";
 import { pushBackHandler } from "../native/platform";
 import { back } from "../router";
 
@@ -9,8 +10,8 @@ export function Page({ title, eyebrow, showBack, actions, children }: { title: R
     <div className="screen">
       <header className="page-head">
         {showBack && (
-          <button className="icon-btn" aria-label="Back" onClick={() => back()}>
-            <ChevronLeft size={24} />
+          <button className="icon-btn" aria-label={t("common.back")} onClick={() => back()}>
+            <ChevronLeft size={24} className="flip-rtl" />
           </button>
         )}
         <div className="title">
@@ -175,7 +176,7 @@ export function Sheet({ open, onClose, title, children }: { open: boolean; onClo
         <div className="grabber" />
         <div className="sheet-head">
           <h2>{title}</h2>
-          <button className="icon-btn" aria-label="Close" onClick={onClose}>
+          <button className="icon-btn" aria-label={t("common.close")} onClick={onClose}>
             <X size={20} />
           </button>
         </div>
@@ -237,10 +238,10 @@ export function OverlayHost() {
             {req.body && <div className="muted mt">{req.body}</div>}
             <div className="row mt-l" style={{ justifyContent: "flex-end" }}>
               <button className="btn" onClick={() => close(false)}>
-                Cancel
+                {t("common.cancel")}
               </button>
               <button className={`btn ${req.danger ? "danger" : "primary"}`} onClick={() => close(true)}>
-                {req.confirm ?? "Confirm"}
+                {req.confirm ?? t("common.confirm")}
               </button>
             </div>
           </div>
@@ -258,8 +259,8 @@ export function OverlayHost() {
 }
 
 export function xpToast(res: { xp: number; achievements: string[] }) {
-  if (res.xp > 0) toast(`+${res.xp} XP`, "xp");
-  for (const a of res.achievements) toast(`🏅 Achievement unlocked: ${a}`, "xp");
+  if (res.xp > 0) toast(t("common.xp", { n: res.xp }), "xp");
+  for (const a of res.achievements) toast(t("toast.achievement", { title: a }), "xp");
 }
 
 export const COURSE_COLORS = ["#4f6bff", "#7b5cff", "#e0405a", "#f2a93b", "#16a36a", "#0ea5b7", "#ec4899", "#64748b"];
